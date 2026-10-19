@@ -163,7 +163,7 @@ typedef struct {
     bool         scrobbled;
     uint32_t     last_timeline_ms;
     uint32_t     play_start_ticks;
-    int          transcode;          /* cfg->stream_bitrate_kbps > 0 at track-start time */
+    int          transcode;          /* plex_config_stream_kbps(cfg) > 0 at track-start time */
     char         badge_str[32];      /* e.g. "FLAC 44", "OPUS 256", "MP3 320"; "" = hide */
     PreloadSlot  preload[MAX_PRELOAD_SLOTS];
 } PlayerModuleState;
@@ -319,15 +319,15 @@ static void preload_tick(const PlexConfig *cfg)
 
         /* Determine format */
         char ext[16];
-        if (cfg->stream_bitrate_kbps > 0)
+        if (plex_config_stream_kbps(cfg) > 0)
             snprintf(ext, sizeof(ext), "opus");
         else
             extract_ext(t->media_key, ext, sizeof(ext));
 
         /* Build URL */
         char url[2048];
-        if (cfg->stream_bitrate_kbps > 0)
-            plex_api_get_transcode_url(cfg, t, cfg->stream_bitrate_kbps,
+        if (plex_config_stream_kbps(cfg) > 0)
+            plex_api_get_transcode_url(cfg, t, plex_config_stream_kbps(cfg),
                                        url, sizeof(url));
         else
             plex_api_get_stream_url(cfg, t, url, sizeof(url));
@@ -454,7 +454,7 @@ static bool preload_consume(const PlexConfig *cfg)
             Player_play();
             s_state.scrobbled        = false;
             s_state.last_timeline_ms = SDL_GetTicks();
-            build_badge_str(t, s_state.transcode && !s_state.is_local_file, cfg->stream_bitrate_kbps,
+            build_badge_str(t, s_state.transcode && !s_state.is_local_file, plex_config_stream_kbps(cfg),
                             Player_getTrackInfo()->sample_rate,
                             s_state.badge_str, sizeof(s_state.badge_str));
             /* Mark slot as playing — slot stays occupied until next preload_consume
@@ -817,7 +817,7 @@ static void load_next_track(PlexQueue *queue,
             {
                 const PlexConfig *lnt_cfg = plex_config_get_mutable();
                 build_badge_str(t, s_state.transcode && !s_state.is_local_file,
-                                lnt_cfg ? lnt_cfg->stream_bitrate_kbps : 0,
+                                lnt_cfg ? plex_config_stream_kbps(lnt_cfg) : 0,
                                 Player_getTrackInfo()->sample_rate,
                                 s_state.badge_str, sizeof(s_state.badge_str));
             }
@@ -895,7 +895,7 @@ static bool handle_track_end(const PlexConfig *cfg, PlexQueue *queue,
         plex_art_clear();
         const PlexTrack *t = plex_queue_current_track();
         if (t) plex_art_fetch(cfg, t->thumb);
-        s_state.transcode = (cfg->stream_bitrate_kbps > 0);
+        s_state.transcode = (plex_config_stream_kbps(cfg) > 0);
         load_next_track(queue, screen_state);
         return true;
     }
@@ -909,7 +909,7 @@ static bool handle_track_end(const PlexConfig *cfg, PlexQueue *queue,
             if (t) plex_art_fetch(cfg, t->thumb);
         }
 
-        s_state.transcode = (cfg->stream_bitrate_kbps > 0);
+        s_state.transcode = (plex_config_stream_kbps(cfg) > 0);
         if (preload_consume(cfg)) {
             s_state.is_local_file = false;
             *screen_state = PLAYER_SCREEN_PLAYING;
@@ -954,7 +954,7 @@ static bool handle_downloading_state(const PlexConfig *cfg, int *screen_state)
             *screen_state            = PLAYER_SCREEN_PLAYING;
             {
                 const PlexTrack *t = plex_queue_current_track();
-                if (t) build_badge_str(t, s_state.transcode && !s_state.is_local_file, cfg->stream_bitrate_kbps,
+                if (t) build_badge_str(t, s_state.transcode && !s_state.is_local_file, plex_config_stream_kbps(cfg),
                                        Player_getTrackInfo()->sample_rate,
                                        s_state.badge_str, sizeof(s_state.badge_str));
             }
@@ -998,7 +998,7 @@ static bool handle_downloading_state(const PlexConfig *cfg, int *screen_state)
                 s_state.scrobbled           = false;
                 s_state.last_timeline_ms    = SDL_GetTicks();
                 *screen_state               = PLAYER_SCREEN_PLAYING;
-                if (t) build_badge_str(t, s_state.transcode && !s_state.is_local_file, cfg->stream_bitrate_kbps,
+                if (t) build_badge_str(t, s_state.transcode && !s_state.is_local_file, plex_config_stream_kbps(cfg),
                                        Player_getTrackInfo()->sample_rate,
                                        s_state.badge_str, sizeof(s_state.badge_str));
                 return true;
@@ -1066,7 +1066,7 @@ AppModule module_player_run(SDL_Surface *screen)
         }
 
         /* Populate s_state fields for the new track */
-        s_state.transcode     = (cfg->stream_bitrate_kbps > 0);
+        s_state.transcode     = (plex_config_stream_kbps(cfg) > 0);
         {
             const PlexTrack *t = plex_queue_current_track();
             s_state.is_local_file = t ? (t->local_path[0] != '\0') : false;
@@ -1100,7 +1100,7 @@ AppModule module_player_run(SDL_Surface *screen)
                 screen_state             = PLAYER_SCREEN_PLAYING;
                 const PlexTrack *cur = plex_queue_current_track();
                 if (cur && cur->duration_ms > 0) Player_setDurationMs(cur->duration_ms);
-                build_badge_str(cur, s_state.transcode && !s_state.is_local_file, cfg->stream_bitrate_kbps,
+                build_badge_str(cur, s_state.transcode && !s_state.is_local_file, plex_config_stream_kbps(cfg),
                                 Player_getTrackInfo()->sample_rate,
                                 s_state.badge_str, sizeof(s_state.badge_str));
             } else {
@@ -1371,7 +1371,7 @@ AppModule module_player_run(SDL_Surface *screen)
                                 s_state.temp_path[sizeof(s_state.temp_path) - 1] = '\0';
                                 s_state.ext[0] = '\0';
                             } else if (t) {
-                                if (cfg->stream_bitrate_kbps > 0)
+                                if (plex_config_stream_kbps(cfg) > 0)
                                     strncpy(s_state.ext, "opus", sizeof(s_state.ext) - 1);
                                 else
                                     extract_ext(t->media_key, s_state.ext, sizeof(s_state.ext));
@@ -1397,7 +1397,7 @@ AppModule module_player_run(SDL_Surface *screen)
                         Player_stop();
                         if (!old_is_local) remove(old_temp_path);
 
-                        s_state.transcode = (cfg->stream_bitrate_kbps > 0);
+                        s_state.transcode = (plex_config_stream_kbps(cfg) > 0);
                         load_next_track(queue, &screen_state);
                         dirty = 1;
                     }
@@ -1445,7 +1445,7 @@ AppModule module_player_run(SDL_Surface *screen)
                         Player_stop();
                         if (!old_is_local) remove(old_temp_path);
 
-                        s_state.transcode = (cfg->stream_bitrate_kbps > 0);
+                        s_state.transcode = (plex_config_stream_kbps(cfg) > 0);
 
                         if (!preload_consume(cfg)) {
                             preload_cancel_all();
@@ -1503,7 +1503,7 @@ AppModule module_player_run(SDL_Surface *screen)
                             s_state.last_timeline_ms = SDL_GetTicks();
                             screen_state             = PLAYER_SCREEN_PLAYING;
                             if (t->duration_ms > 0) Player_setDurationMs(t->duration_ms);
-                            build_badge_str(t, s_state.transcode && !s_state.is_local_file, cfg->stream_bitrate_kbps,
+                            build_badge_str(t, s_state.transcode && !s_state.is_local_file, plex_config_stream_kbps(cfg),
                                             Player_getTrackInfo()->sample_rate,
                                             s_state.badge_str, sizeof(s_state.badge_str));
                         } else {
@@ -1624,7 +1624,7 @@ void PlayerModule_backgroundTick(void)
             const PlexTrack *t = plex_queue_current_track();
             if (!t) { Background_setActive(BG_NONE); return; }
             plex_art_fetch(cfg, t->thumb);
-            s_state.transcode = (cfg->stream_bitrate_kbps > 0);
+            s_state.transcode = (plex_config_stream_kbps(cfg) > 0);
             s_state.is_local_file = (t->local_path[0] != '\0');
             if (s_state.is_local_file) {
                 strncpy(s_state.temp_path, t->local_path, sizeof(s_state.temp_path) - 1);
@@ -1634,7 +1634,7 @@ void PlayerModule_backgroundTick(void)
                 if (Player_load(s_state.temp_path) == 0) {
                     s_state.play_start_ticks = SDL_GetTicks();
                     Player_play();
-                    build_badge_str(t, s_state.transcode && !s_state.is_local_file, cfg->stream_bitrate_kbps,
+                    build_badge_str(t, s_state.transcode && !s_state.is_local_file, plex_config_stream_kbps(cfg),
                                     Player_getTrackInfo()->sample_rate,
                                     s_state.badge_str, sizeof(s_state.badge_str));
                 } else { Background_setActive(BG_NONE); return; }
@@ -1665,7 +1665,7 @@ void PlayerModule_backgroundTick(void)
                 if (t) plex_art_fetch(cfg, t->thumb);
             }
 
-            s_state.transcode = (cfg->stream_bitrate_kbps > 0);
+            s_state.transcode = (plex_config_stream_kbps(cfg) > 0);
             {
                 const PlexTrack *t = plex_queue_current_track();
                 s_state.is_local_file = t ? (t->local_path[0] != '\0') : false;
@@ -1679,7 +1679,7 @@ void PlayerModule_backgroundTick(void)
                     if (Player_load(s_state.temp_path) == 0) {
                         s_state.play_start_ticks = SDL_GetTicks();
                         Player_play();
-                        build_badge_str(t, s_state.transcode && !s_state.is_local_file, cfg->stream_bitrate_kbps,
+                        build_badge_str(t, s_state.transcode && !s_state.is_local_file, plex_config_stream_kbps(cfg),
                                         Player_getTrackInfo()->sample_rate,
                                         s_state.badge_str, sizeof(s_state.badge_str));
                     } else {
@@ -1738,7 +1738,7 @@ void PlayerModule_backgroundTick(void)
                     const PlexTrack *t  = plex_queue_current_track();
                     const PlexConfig *bg_cfg = plex_config_get_mutable();
                     if (t && bg_cfg)
-                        build_badge_str(t, s_state.transcode && !s_state.is_local_file, bg_cfg->stream_bitrate_kbps,
+                        build_badge_str(t, s_state.transcode && !s_state.is_local_file, plex_config_stream_kbps(bg_cfg),
                                         Player_getTrackInfo()->sample_rate,
                                         s_state.badge_str, sizeof(s_state.badge_str));
                 }
@@ -1780,7 +1780,7 @@ void PlayerModule_backgroundTick(void)
                     {
                         const PlexConfig *bg_cfg = plex_config_get_mutable();
                         if (t && bg_cfg)
-                            build_badge_str(t, s_state.transcode && !s_state.is_local_file, bg_cfg->stream_bitrate_kbps,
+                            build_badge_str(t, s_state.transcode && !s_state.is_local_file, plex_config_stream_kbps(bg_cfg),
                                             Player_getTrackInfo()->sample_rate,
                                             s_state.badge_str, sizeof(s_state.badge_str));
                     }

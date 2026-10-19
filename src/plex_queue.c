@@ -3,6 +3,7 @@
 #include <time.h>
 #include "plex_queue.h"
 #include "plex_api.h"
+#include "plex_config.h"
 
 /* Global singleton queue */
 static PlexQueue g_queue;
@@ -31,9 +32,9 @@ void plex_queue_set(const PlexConfig *cfg,
 
     if (g_queue.tracks[g_queue.current_index].local_path[0] != '\0')
         g_queue.stream_url[0] = '\0';
-    else if (cfg->stream_bitrate_kbps > 0)
+    else if (plex_config_stream_kbps(cfg) > 0)
         plex_api_get_transcode_url(cfg, &g_queue.tracks[g_queue.current_index],
-                                   cfg->stream_bitrate_kbps,
+                                   plex_config_stream_kbps(cfg),
                                    g_queue.stream_url, sizeof(g_queue.stream_url));
     else
         plex_api_get_stream_url(cfg, &g_queue.tracks[g_queue.current_index],
@@ -57,9 +58,9 @@ bool plex_queue_next(const PlexConfig *cfg)
     const PlexTrack *t = &g_queue.tracks[g_queue.shuffle_order[g_queue.current_index]];
     if (t->local_path[0] != '\0')
         g_queue.stream_url[0] = '\0';
-    else if (cfg->stream_bitrate_kbps > 0)
+    else if (plex_config_stream_kbps(cfg) > 0)
         plex_api_get_transcode_url(cfg, t,
-                                   cfg->stream_bitrate_kbps,
+                                   plex_config_stream_kbps(cfg),
                                    g_queue.stream_url, sizeof(g_queue.stream_url));
     else
         plex_api_get_stream_url(cfg, t,
@@ -76,9 +77,9 @@ bool plex_queue_prev(const PlexConfig *cfg)
     const PlexTrack *t = &g_queue.tracks[g_queue.shuffle_order[g_queue.current_index]];
     if (t->local_path[0] != '\0')
         g_queue.stream_url[0] = '\0';
-    else if (cfg->stream_bitrate_kbps > 0)
+    else if (plex_config_stream_kbps(cfg) > 0)
         plex_api_get_transcode_url(cfg, t,
-                                   cfg->stream_bitrate_kbps,
+                                   plex_config_stream_kbps(cfg),
                                    g_queue.stream_url, sizeof(g_queue.stream_url));
     else
         plex_api_get_stream_url(cfg, t,

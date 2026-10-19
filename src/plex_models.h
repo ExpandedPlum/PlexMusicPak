@@ -12,11 +12,24 @@
 #define PLEX_MAX_OFFLINE_ITEMS 5000 /* offline artist/album array cap */
 #define PLEX_MAX_CONNS          8   /* connection URIs kept per server */
 
+/* How a connection URI reaches the server, from plex.tv's local/relay flags */
+typedef enum {
+    PLEX_CONN_LOCAL  = 0,
+    PLEX_CONN_REMOTE = 1,
+    PLEX_CONN_RELAY  = 2
+} PlexConnKind;
+
+/* Streaming bitrate used instead of Original while on a relay connection;
+ * Plex caps relay bandwidth at roughly 1-2 Mbps, too little for lossless. */
+#define PLEX_RELAY_STREAM_KBPS 128
+
 typedef struct {
     char token[PLEX_MAX_STR];
     char server_url[PLEX_MAX_URL];   /* URL in use this session; first reachable conn_urls entry */
     char conn_urls[PLEX_MAX_CONNS][PLEX_MAX_URL]; /* ranked: local, remote, relay */
+    PlexConnKind conn_kinds[PLEX_MAX_CONNS];
     int  conn_count;
+    PlexConnKind server_kind;        /* kind of server_url; session only */
     char server_name[PLEX_MAX_STR];
     char server_id[PLEX_MAX_STR];    /* clientIdentifier */
     bool offline_mode;               /* true = offline browse; persisted to config.json */
@@ -32,6 +45,7 @@ typedef struct {
 typedef struct {
     char name[PLEX_MAX_STR];
     char conn_urls[PLEX_MAX_CONNS][PLEX_MAX_URL]; /* ranked: local, remote, relay */
+    PlexConnKind conn_kinds[PLEX_MAX_CONNS];
     int  conn_count;
     char id[PLEX_MAX_STR];           /* clientIdentifier */
     bool owned;

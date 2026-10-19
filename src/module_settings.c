@@ -119,9 +119,12 @@ static void render_settings_menu(SDL_Surface *screen, int show_setting,
     ListLayout layout = calc_list_layout(screen);
 
     /* --- Selectable menu items --- */
-    char server_label[PLEX_MAX_STR + 12];
-    if (cfg->server_name[0])
+    char server_label[PLEX_MAX_STR + 24];
+    if (cfg->server_name[0] && cfg->offline_mode)
         snprintf(server_label, sizeof(server_label), "Server: %s", cfg->server_name);
+    else if (cfg->server_name[0])
+        snprintf(server_label, sizeof(server_label), "Server: %s (%s)", cfg->server_name,
+                 plex_conn_kind_label(cfg->server_kind));
     else
         snprintf(server_label, sizeof(server_label), "Server: (unknown)");
 
@@ -135,9 +138,13 @@ static void render_settings_menu(SDL_Surface *screen, int show_setting,
     snprintf(timeout_label, sizeof(timeout_label), "Screen timeout: %s",
              screen_timeout_label(cfg->screen_timeout));
 
-    char stream_bitrate_label[32];
-    snprintf(stream_bitrate_label, sizeof(stream_bitrate_label),
-             "Streaming Quality: %s", bitrate_label(cfg->stream_bitrate_kbps));
+    char stream_bitrate_label[64];
+    if (plex_config_stream_kbps(cfg) != cfg->stream_bitrate_kbps)
+        snprintf(stream_bitrate_label, sizeof(stream_bitrate_label),
+                 "Streaming Quality: Original (%d kbps on relay)", plex_config_stream_kbps(cfg));
+    else
+        snprintf(stream_bitrate_label, sizeof(stream_bitrate_label),
+                 "Streaming Quality: %s", bitrate_label(cfg->stream_bitrate_kbps));
 
     char download_bitrate_label[32];
     snprintf(download_bitrate_label, sizeof(download_bitrate_label),

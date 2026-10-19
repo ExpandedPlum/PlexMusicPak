@@ -52,9 +52,40 @@ static void ensure_config_dir(const char *file_path)
     mkdir(dir, 0755);
 }
 
+/* conn_kinds as stored in config.json */
+static const char *const CONN_KIND_NAMES[] = { "local", "remote", "relay" };
+
+static PlexConnKind conn_kind_from_name(const char *name)
+{
+    for (int i = 0; i < 3; i++)
+        if (name && strcmp(name, CONN_KIND_NAMES[i]) == 0) return (PlexConnKind)i;
+    return PLEX_CONN_REMOTE;
+}
+
 /* ------------------------------------------------------------------
  * Public API
  * ------------------------------------------------------------------ */
+
+const char *plex_conn_kind_name(PlexConnKind kind)
+{
+    return ((unsigned)kind < 3) ? CONN_KIND_NAMES[kind] : "remote";
+}
+
+const char *plex_conn_kind_label(PlexConnKind kind)
+{
+    switch (kind) {
+        case PLEX_CONN_LOCAL: return "Local";
+        case PLEX_CONN_RELAY: return "Relay";
+        default:              return "Remote";
+    }
+}
+
+int plex_config_stream_kbps(const PlexConfig *cfg)
+{
+    if (cfg->stream_bitrate_kbps == 0 && cfg->server_kind == PLEX_CONN_RELAY)
+        return PLEX_RELAY_STREAM_KBPS;
+    return cfg->stream_bitrate_kbps;
+}
 
 int plex_config_load(PlexConfig *cfg)
 {
@@ -90,19 +121,30 @@ int plex_config_load(PlexConfig *cfg)
     if (conns) {
         size_t n = json_array_get_count(conns);
         for (size_t i = 0; i < n && cfg->conn_count < PLEX_MAX_CONNS; i++) {
-            const char *uri = json_array_get_string(conns, i);
+            /* {"uri","kind"} objects; bare URI strings from earlier builds */
+            JSON_Object *c  = json_array_get_object(conns, i);
+            const char *uri = c ? json_object_get_string(c, "uri")
+                                : json_array_get_string(conns, i);
             if (!uri || !*uri) continue;
             strncpy(cfg->conn_urls[cfg->conn_count], uri, PLEX_MAX_URL - 1);
+            cfg->conn_kinds[cfg->conn_count] =
+                conn_kind_from_name(c ? json_object_get_string(c, "kind") : NULL);
             cfg->conn_count++;
         }
     } else {
-        /* Configs from before "connections" only kept server_url + relay_url */
+        /* Configs from before "connections" only kept server_url + relay_url.
+         * Their kinds are unknown; treat both as remote until the startup
+         * refresh replaces the list. */
         const char *relay_url = json_object_get_string(obj, "relay_url");
-        if (server_url && *server_url)
-            strncpy(cfg->conn_urls[cfg->conn_count++], server_url, PLEX_MAX_URL - 1);
+        if (server_url && *server_url) {
+            strncpy(cfg->conn_urls[cfg->conn_count], server_url, PLEX_MAX_URL - 1);
+            cfg->conn_kinds[cfg->conn_count++] = PLEX_CONN_REMOTE;
+        }
         if (relay_url && *relay_url &&
-            !(server_url && strcmp(relay_url, server_url) == 0))
-            strncpy(cfg->conn_urls[cfg->conn_count++], relay_url, PLEX_MAX_URL - 1);
+            !(server_url && strcmp(relay_url, server_url) == 0)) {
+            strncpy(cfg->conn_urls[cfg->conn_count], relay_url, PLEX_MAX_URL - 1);
+            cfg->conn_kinds[cfg->conn_count++] = PLEX_CONN_REMOTE;
+        }
     }
 
     if (server_name)
@@ -165,8 +207,13 @@ int plex_config_save(const PlexConfig *cfg)
     json_object_set_string(obj, "server_url",   cfg->server_url);
     JSON_Value *conns_val = json_value_init_array();
     JSON_Array *conns     = json_value_get_array(conns_val);
-    for (int i = 0; i < cfg->conn_count; i++)
-        json_array_append_string(conns, cfg->conn_urls[i]);
+    for (int i = 0; i < cfg->conn_count; i++) {
+        JSON_Value  *c_val = json_value_init_object();
+        JSON_Object *c     = json_value_get_object(c_val);
+        json_object_set_string(c, "uri",  cfg->conn_urls[i]);
+        json_object_set_string(c, "kind", plex_conn_kind_name(cfg->conn_kinds[i]));
+        json_array_append_value(conns, c_val);
+    }
     json_object_set_value(obj, "connections", conns_val);
     json_object_set_string(obj, "server_name",  cfg->server_name);
     json_object_set_string(obj, "server_id",    cfg->server_id);

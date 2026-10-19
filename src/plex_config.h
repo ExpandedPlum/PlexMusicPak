@@ -20,6 +20,18 @@ int plex_config_save(const PlexConfig *cfg);
 /* Returns true if cfg has a non-empty token and server_url. */
 bool plex_config_is_valid(const PlexConfig *cfg);
 
+/* "local" / "remote" / "relay", as stored in config.json */
+const char *plex_conn_kind_name(PlexConnKind kind);
+
+/* "Local" / "Remote" / "Relay", for display */
+const char *plex_conn_kind_label(PlexConnKind kind);
+
+/*
+ * Streaming bitrate to request for this session: stream_bitrate_kbps, except
+ * Original (0) becomes PLEX_RELAY_STREAM_KBPS on a relay connection.
+ */
+int plex_config_stream_kbps(const PlexConfig *cfg);
+
 /*
  * Return a mutable pointer to the application-global PlexConfig.
  * Defined in main.c. Modules call this to update the live config after

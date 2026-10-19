@@ -156,12 +156,21 @@ static int conn_rank(JSON_Object *conn)
     return tier * 4 + plex_direct * 2 + https_penalty;
 }
 
+static PlexConnKind conn_kind(JSON_Object *conn)
+{
+    if (json_object_get_boolean(conn, "local") == 1) return PLEX_CONN_LOCAL;
+    if (json_object_get_boolean(conn, "relay") == 1) return PLEX_CONN_RELAY;
+    return PLEX_CONN_REMOTE;
+}
+
 /* ------------------------------------------------------------------
- * ranked_conn_uris — copy the connection URIs into out[], best rank first.
+ * ranked_conn_uris — copy the connection URIs into out[] (and their kinds
+ * into kinds[]), best rank first.
  * Equal ranks keep plex.tv's order; duplicate URIs are dropped.
  * Returns the number of URIs written (0 if none).
  * ------------------------------------------------------------------ */
-static int ranked_conn_uris(JSON_Array *conns, char out[][PLEX_MAX_URL], int max)
+static int ranked_conn_uris(JSON_Array *conns, char out[][PLEX_MAX_URL],
+                            PlexConnKind kinds[], int max)
 {
     if (!conns) return 0;
 
@@ -190,9 +199,11 @@ static int ranked_conn_uris(JSON_Array *conns, char out[][PLEX_MAX_URL], int max
         for (int j = last; j > pos; j--) {
             memcpy(out[j], out[j - 1], PLEX_MAX_URL);
             ranks[j] = ranks[j - 1];
+            kinds[j] = kinds[j - 1];
         }
         strcpy(out[pos], uri);
         ranks[pos] = rank;
+        kinds[pos] = conn_kind(c);
         if (count < max) count++;
     }
     return count;
@@ -255,7 +266,8 @@ int plex_auth_get_servers(const char *token, PlexServer servers[], int *count)
         memset(sv, 0, sizeof(*sv));
 
         JSON_Array *conns = json_object_get_array(res, "connections");
-        sv->conn_count = ranked_conn_uris(conns, sv->conn_urls, PLEX_MAX_CONNS);
+        sv->conn_count = ranked_conn_uris(conns, sv->conn_urls, sv->conn_kinds,
+                                          PLEX_MAX_CONNS);
         if (sv->conn_count == 0) continue;
 
         const char *name = json_object_get_string(res, "name");
@@ -291,10 +303,12 @@ void plex_auth_apply_server(PlexConfig *cfg, const PlexServer *sv)
     cfg->server_id[PLEX_MAX_STR - 1] = '\0';
 
     memcpy(cfg->conn_urls, sv->conn_urls, sizeof(cfg->conn_urls));
+    memcpy(cfg->conn_kinds, sv->conn_kinds, sizeof(cfg->conn_kinds));
     cfg->conn_count = sv->conn_count;
     if (cfg->conn_count > 0) {
         strncpy(cfg->server_url, cfg->conn_urls[0], PLEX_MAX_URL - 1);
         cfg->server_url[PLEX_MAX_URL - 1] = '\0';
+        cfg->server_kind = cfg->conn_kinds[0];
     }
 }
 
@@ -356,10 +370,12 @@ int plex_auth_refresh_server_urls(PlexConfig *cfg)
         if (!cid || strcmp(cid, cfg->server_id) != 0) continue;
 
         char conns_buf[PLEX_MAX_CONNS][PLEX_MAX_URL];
+        PlexConnKind kinds_buf[PLEX_MAX_CONNS];
         int conn_count = ranked_conn_uris(json_object_get_array(res, "connections"),
-                                          conns_buf, PLEX_MAX_CONNS);
+                                          conns_buf, kinds_buf, PLEX_MAX_CONNS);
         if (conn_count > 0) {
             memcpy(cfg->conn_urls, conns_buf, sizeof(cfg->conn_urls));
+            memcpy(cfg->conn_kinds, kinds_buf, sizeof(cfg->conn_kinds));
             cfg->conn_count = conn_count;
             plex_config_save(cfg);
             PLEX_LOG("[Auth] server URLs refreshed: %d connections\n", conn_count);
@@ -407,8 +423,10 @@ int plex_auth_select_connection(PlexConfig *cfg)
         if (plex_net_fetch(identity_url, probe_buf, (int)sizeof(probe_buf), &probe_opts) > 0) {
             strncpy(cfg->server_url, cfg->conn_urls[i], PLEX_MAX_URL - 1);
             cfg->server_url[PLEX_MAX_URL - 1] = '\0';
-            PLEX_LOG("[Auth] using connection %d/%d: %s\n",
-                     i + 1, cfg->conn_count, cfg->server_url);
+            cfg->server_kind = cfg->conn_kinds[i];
+            PLEX_LOG("[Auth] using connection %d/%d (%s): %s\n",
+                     i + 1, cfg->conn_count, plex_conn_kind_label(cfg->server_kind),
+                     cfg->server_url);
             return 0;
         }
         PLEX_LOG("[Auth] connection %d/%d unreachable: %s\n",
@@ -419,6 +437,7 @@ int plex_auth_select_connection(PlexConfig *cfg)
      * normal network error and retry flow. */
     strncpy(cfg->server_url, cfg->conn_urls[0], PLEX_MAX_URL - 1);
     cfg->server_url[PLEX_MAX_URL - 1] = '\0';
+    cfg->server_kind = cfg->conn_kinds[0];
     PLEX_LOG_ERROR("[Auth] no connection reachable; using %s\n", cfg->server_url);
     return -1;
 }

@@ -238,13 +238,13 @@ static int opus_download_track(const char *server_url,
              "&musicBitrate=%d"
              "&session=%s"
              "&directPlay=0"
-             "&X-Plex-Client-Identifier=plexmusic-nextui"
+             "&X-Plex-Client-Identifier=%s"
              "&X-Plex-Session-Identifier=%s"
              "&X-Plex-Chunked=1"
              "&X-Plex-Client-Profile-Extra=%s"
              "&X-Plex-Token=%s",
              server_url, track_rating_key, bitrate_kbps,
-             session_id, session_id, OPUS_PROFILE_EXTRA, token);
+             session_id, plex_net_client_id(), session_id, OPUS_PROFILE_EXTRA, token);
 
     static uint8_t decision_buf[16 * 1024];
     PlexNetOptions opts;
@@ -270,13 +270,13 @@ static int opus_download_track(const char *server_url,
              "&musicBitrate=%d"
              "&session=%s"
              "&directPlay=0"
-             "&X-Plex-Client-Identifier=plexmusic-nextui"
+             "&X-Plex-Client-Identifier=%s"
              "&X-Plex-Session-Identifier=%s"
              "&X-Plex-Chunked=1"
              "&X-Plex-Client-Profile-Extra=%s"
              "&X-Plex-Token=%s",
              server_url, track_rating_key, bitrate_kbps,
-             session_id, session_id, OPUS_PROFILE_EXTRA, token);
+             session_id, plex_net_client_id(), session_id, OPUS_PROFILE_EXTRA, token);
 
     memset(&opts, 0, sizeof(opts));
     opts.method      = PLEX_HTTP_GET;
@@ -308,13 +308,13 @@ static int opus_download_track(const char *server_url,
              "&musicBitrate=%d"
              "&session=%s"
              "&directPlay=0"
-             "&X-Plex-Client-Identifier=plexmusic-nextui"
+             "&X-Plex-Client-Identifier=%s"
              "&X-Plex-Session-Identifier=%s"
              "&X-Plex-Chunked=1"
              "&X-Plex-Client-Profile-Extra=%s"
              "&X-Plex-Token=%s",
              server_url, track_rating_key, bitrate_kbps,
-             session_id, session_id, OPUS_PROFILE_EXTRA, token);
+             session_id, plex_net_client_id(), session_id, OPUS_PROFILE_EXTRA, token);
 
     static uint8_t stop_buf[1024];
     memset(&opts, 0, sizeof(opts));

@@ -93,6 +93,8 @@ int main(int argc, char *argv[]) {
      */
     memset(&g_config, 0, sizeof(g_config));
     plex_config_load(&g_config);
+    plex_config_ensure_client_id(&g_config);
+    plex_net_set_client_id(g_config.client_id);
 
     if (!g_config.offline_mode) {
         render_status_message(screen, "Connecting to server...");

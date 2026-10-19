@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <time.h>
 
 #include "include/parson/parson.h"
 #include "api.h"
@@ -111,6 +112,7 @@ int plex_config_load(PlexConfig *cfg)
     const char *server_url  = json_object_get_string(obj, "server_url");
     const char *server_name = json_object_get_string(obj, "server_name");
     const char *server_id   = json_object_get_string(obj, "server_id");
+    const char *client_id   = json_object_get_string(obj, "client_id");
 
     if (token)
         strncpy(cfg->token, token, sizeof(cfg->token) - 1);
@@ -151,6 +153,8 @@ int plex_config_load(PlexConfig *cfg)
         strncpy(cfg->server_name, server_name, sizeof(cfg->server_name) - 1);
     if (server_id)
         strncpy(cfg->server_id, server_id, sizeof(cfg->server_id) - 1);
+    if (client_id)
+        strncpy(cfg->client_id, client_id, sizeof(cfg->client_id) - 1);
 
     cfg->offline_mode = (json_object_get_boolean(obj, "offline_mode") == 1);
 
@@ -217,6 +221,7 @@ int plex_config_save(const PlexConfig *cfg)
     json_object_set_value(obj, "connections", conns_val);
     json_object_set_string(obj, "server_name",  cfg->server_name);
     json_object_set_string(obj, "server_id",    cfg->server_id);
+    json_object_set_string(obj, "client_id",    cfg->client_id);
     json_object_set_boolean(obj, "offline_mode", cfg->offline_mode ? 1 : 0);
     json_object_set_number(obj, "screen_timeout", cfg->screen_timeout);
     json_object_set_number(obj, "library_id",     cfg->library_id);
@@ -247,6 +252,36 @@ int plex_config_save(const PlexConfig *cfg)
         return -1;
     }
     return 0;
+}
+
+void plex_config_new_client_id(PlexConfig *cfg)
+{
+    unsigned char rnd[8] = {0};
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd < 0 || read(fd, rnd, sizeof(rnd)) != (ssize_t)sizeof(rnd)) {
+        /* No urandom: still unique enough per device */
+        unsigned long seed = (unsigned long)time(NULL) ^ ((unsigned long)getpid() << 16);
+        for (size_t i = 0; i < sizeof(rnd); i++) {
+            seed = seed * 1103515245UL + 12345UL;
+            rnd[i] = (unsigned char)(seed >> 16);
+        }
+    }
+    if (fd >= 0) close(fd);
+
+    int n = snprintf(cfg->client_id, sizeof(cfg->client_id), "plexmusic-");
+    for (size_t i = 0; i < sizeof(rnd); i++)
+        n += snprintf(cfg->client_id + n, sizeof(cfg->client_id) - n, "%02x", rnd[i]);
+}
+
+void plex_config_ensure_client_id(PlexConfig *cfg)
+{
+    if (cfg->client_id[0]) return;
+    if (cfg->token[0])
+        /* Signed in before per-device ids: the token was issued to the old
+         * shared id, so keep sending it until the next sign-in. */
+        snprintf(cfg->client_id, sizeof(cfg->client_id), "%s", PLEX_LEGACY_CLIENT_ID);
+    else
+        plex_config_new_client_id(cfg);
 }
 
 bool plex_config_is_valid(const PlexConfig *cfg)

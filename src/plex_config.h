@@ -17,6 +17,18 @@ int plex_config_load(PlexConfig *cfg);
  */
 int plex_config_save(const PlexConfig *cfg);
 
+/* X-Plex-Client-Identifier every install sent before per-device ids */
+#define PLEX_LEGACY_CLIENT_ID "nextui-plex-music"
+
+/* Give cfg a new random client_id ("plexmusic-" + 16 hex digits). */
+void plex_config_new_client_id(PlexConfig *cfg);
+
+/*
+ * Fill cfg->client_id if empty: the legacy shared id when already signed in
+ * (the saved token belongs to it), otherwise a new random one.
+ */
+void plex_config_ensure_client_id(PlexConfig *cfg);
+
 /* Returns true if cfg has a non-empty token and server_url. */
 bool plex_config_is_valid(const PlexConfig *cfg);
 

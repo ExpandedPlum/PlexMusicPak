@@ -9,6 +9,7 @@
 #include "module_settings.h"
 #include "plex_art.h"
 #include "plex_auth.h"
+#include "plex_net.h"
 #include "plex_config.h"
 #include "plex_models.h"
 #include "ui_fonts.h"
@@ -538,7 +539,16 @@ AppModule module_settings_run(SDL_Surface *screen)
             if (PAD_justPressed(BTN_A)) {
                 /* Confirmed — zero config, save, clear art, reset browse, go to auth */
                 PlexConfig *cfg = plex_config_get_mutable();
+                char client_id[sizeof(cfg->client_id)];
+                memcpy(client_id, cfg->client_id, sizeof(client_id));
                 memset(cfg, 0, sizeof(*cfg));
+                /* Keep this device's id; a legacy shared id is replaced so
+                 * the next sign-in gets a token of its own. */
+                if (strcmp(client_id, PLEX_LEGACY_CLIENT_ID) != 0)
+                    memcpy(cfg->client_id, client_id, sizeof(cfg->client_id));
+                else
+                    plex_config_new_client_id(cfg);
+                plex_net_set_client_id(cfg->client_id);
                 plex_config_save(cfg);
                 plex_art_clear();
                 module_browse_reset();

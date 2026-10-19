@@ -126,7 +126,6 @@ static void plex_net_psa_init(void)
 #define PLEX_NET_DEFAULT_TIMEOUT 10
 #define PLEX_MAX_URL            2048
 
-#define PLEX_CLIENT_IDENTIFIER  "nextui-plex-music"
 #define PLEX_PRODUCT            "PlexMusic"
 #define PLEX_VERSION            "0.1.0"
 #define PLEX_PLATFORM           "Chrome"
@@ -149,6 +148,21 @@ typedef struct {
     mbedtls_ctr_drbg_context ctr_drbg;
     bool initialized;
 } PlexSSLCtx;
+
+/* Until set, the id every install shared before per-device ids */
+static char s_client_id[64] = "nextui-plex-music";
+
+void plex_net_set_client_id(const char *client_id)
+{
+    if (!client_id || !*client_id) return;
+    strncpy(s_client_id, client_id, sizeof(s_client_id) - 1);
+    s_client_id[sizeof(s_client_id) - 1] = '\0';
+}
+
+const char *plex_net_client_id(void)
+{
+    return s_client_id;
+}
 
 /* ------------------------------------------------------------------
  * Persistent connection state (one keep-alive connection for fetch calls)
@@ -408,7 +422,7 @@ static int build_request(const char *method_str,
         "%s %s HTTP/1.1\r\n"
         "Host: %s\r\n"
         "Accept: application/json\r\n"
-        "X-Plex-Client-Identifier: " PLEX_CLIENT_IDENTIFIER "\r\n"
+        "X-Plex-Client-Identifier: %s\r\n"
         "X-Plex-Product: " PLEX_PRODUCT "\r\n"
         "X-Plex-Version: " PLEX_VERSION "\r\n"
         "X-Plex-Platform: " PLEX_PLATFORM "\r\n"
@@ -418,6 +432,7 @@ static int build_request(const char *method_str,
         "\r\n"
         "%s",         /* body, may be empty */
         method_str, path, host,
+        s_client_id,
         token_header,
         extra_headers,
         keep_alive ? "Connection: keep-alive\r\n" : "Connection: close\r\n",
@@ -965,14 +980,14 @@ static int plex_net_download_file_internal(const char *url,
         "Host: %s\r\n"
         "Accept: */*\r\n"
         "Accept-Encoding: identity\r\n"
-        "X-Plex-Client-Identifier: " PLEX_CLIENT_IDENTIFIER "\r\n"
+        "X-Plex-Client-Identifier: %s\r\n"
         "X-Plex-Product: " PLEX_PRODUCT "\r\n"
         "X-Plex-Version: " PLEX_VERSION "\r\n"
         "X-Plex-Platform: " PLEX_PLATFORM "\r\n"
         "%s"   /* optional token header */
         "Connection: close\r\n"
         "\r\n",
-        path, host, token_header);
+        path, host, s_client_id, token_header);
     if (n < 0 || n >= 4096) {
         PLEX_LOG_ERROR("[PlexNet] download: request too large\n");
         free(req); free(host); free(path); return -1;

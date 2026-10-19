@@ -523,12 +523,12 @@ void plex_api_get_transcode_url(const PlexConfig *cfg, const PlexTrack *track,
              "&musicBitrate=%d"
              "&path=%%2Flibrary%%2Fmetadata%%2F%d"
              "&session=%s"
-             "&X-Plex-Client-Identifier=plexmusic-nextui"
+             "&X-Plex-Client-Identifier=%s"
              "&X-Plex-Client-Profile-Extra=%s"
              "&X-Plex-Session-Identifier=%s"
              "&X-Plex-Token=%s",
              cfg->server_url, bitrate_kbps, track->rating_key,
-             session_id, OPUS_PROFILE_EXTRA, session_id, cfg->token);
+             session_id, plex_net_client_id(), OPUS_PROFILE_EXTRA, session_id, cfg->token);
 
     snprintf(out_url, out_url_size, "%s", url);
 }

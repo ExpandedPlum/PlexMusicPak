@@ -32,6 +32,7 @@ typedef struct {
     PlexConnKind server_kind;        /* kind of server_url; session only */
     char server_name[PLEX_MAX_STR];
     char server_id[PLEX_MAX_STR];    /* clientIdentifier */
+    char client_id[64];              /* this device's X-Plex-Client-Identifier */
     bool offline_mode;               /* true = offline browse; persisted to config.json */
     int  screen_timeout;             /* seconds before screen sleeps; 0 = disabled */
     int  library_id;                 /* section_id of the selected music library; 0 = none */

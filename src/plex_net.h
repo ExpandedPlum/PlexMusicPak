@@ -18,6 +18,13 @@ typedef struct {
 } PlexNetOptions;
 
 /*
+ * X-Plex-Client-Identifier sent with every request. Set once at startup,
+ * before any request; defaults to the legacy shared id.
+ */
+void        plex_net_set_client_id(const char *client_id);
+const char *plex_net_client_id(void);
+
+/*
  * Fetch a URL with Plex headers.
  *
  * Always adds: X-Plex-Client-Identifier, X-Plex-Product, X-Plex-Version,

@@ -211,22 +211,6 @@ static void render_servers_screen(SDL_Surface *screen, const PlexServer servers[
 /*
  * Render a brief loading indicator (blocking call is about to happen).
  */
-static void render_loading(SDL_Surface *screen, const char *msg)
-{
-    int hw = screen->w;
-    int hh = screen->h;
-
-    SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x12, 0x12, 0x12));
-
-    SDL_Surface *label = TTF_RenderUTF8_Blended(Fonts_getMedium(), msg, COLOR_WHITE);
-    if (label) {
-        SDL_BlitSurface(label, NULL, screen,
-                        &(SDL_Rect){(hw - label->w) / 2, (hh - label->h) / 2});
-        SDL_FreeSurface(label);
-    }
-    GFX_flip(screen);
-}
-
 /*
  * Render the server error screen.
  */
@@ -455,7 +439,7 @@ AppModule module_settings_run(SDL_Surface *screen)
 
             /* Fetch servers on first entry into this state */
             if (!servers_loaded) {
-                render_loading(screen, "Loading servers...");
+                render_status_message(screen, "Loading servers...");
                 PlexConfig *cfg = plex_config_get_mutable();
                 server_count = 0;
                 int result = plex_auth_get_servers(cfg->token, servers, &server_count);
@@ -482,12 +466,12 @@ AppModule module_settings_run(SDL_Surface *screen)
             } else if (PAD_justPressed(BTN_A)) {
                 PlexConfig *cfg = plex_config_get_mutable();
                 plex_auth_apply_server(cfg, &servers[server_selected]);
-                render_loading(screen, "Connecting to server...");
+                render_status_message(screen, "Connecting to server...");
                 plex_auth_select_connection(cfg);
                 plex_config_save(cfg);
 
                 /* Brief confirmation message */
-                render_loading(screen, "Server updated.");
+                render_status_message(screen, "Server updated.");
                 SDL_Delay(SERVER_UPDATED_PAUSE_MS);
 
                 /* Return to settings menu */

@@ -17,6 +17,7 @@
 #include "plex_art.h"
 #include "player.h"
 #include "ui_fonts.h"
+#include "ui_utils.h"
 #include "module_auth.h"
 #include "module_browse.h"
 #include "module_player.h"
@@ -94,8 +95,7 @@ int main(int argc, char *argv[]) {
     plex_config_load(&g_config);
 
     if (!g_config.offline_mode) {
-        SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x12, 0x12, 0x12));
-        GFX_flip(screen);
+        render_status_message(screen, "Connecting to server...");
         if (plex_config_is_valid(&g_config)) {
             plex_auth_refresh_server_urls(&g_config); /* best-effort; failure falls through to cached */
             plex_auth_select_connection(&g_config);
@@ -118,8 +118,7 @@ int main(int argc, char *argv[]) {
         case MODULE_AUTH:
             next = module_auth_run(screen);
             if (next == MODULE_BROWSE && !g_config.offline_mode) {
-                SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x12, 0x12, 0x12));
-                GFX_flip(screen);
+                render_status_message(screen, "Connecting to server...");
                 plex_auth_select_connection(&g_config);
             }
             break;

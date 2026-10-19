@@ -125,21 +125,6 @@ static void render_servers_screen(SDL_Surface *screen, const PlexServer servers[
     GFX_blitButtonGroup((char*[]){"A", "SELECT", "B", "BACK", NULL}, 1, screen, 1);
 }
 
-static void render_loading_screen(SDL_Surface *screen, const char *msg)
-{
-    SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x12, 0x12, 0x12));
-
-    int hw = screen->w;
-    int hh = screen->h;
-    SDL_Surface *surf = TTF_RenderUTF8_Blended(Fonts_getMedium(), msg, COLOR_WHITE);
-    if (surf) {
-        SDL_BlitSurface(surf, NULL, screen,
-                        &(SDL_Rect){(hw - surf->w) / 2, (hh - surf->h) / 2});
-        SDL_FreeSurface(surf);
-    }
-    GFX_flip(screen);
-}
-
 static void render_error_screen(SDL_Surface *screen, const char *message)
 {
     SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x12, 0x12, 0x12));
@@ -189,7 +174,7 @@ AppModule module_auth_run(SDL_Surface *screen)
     const char *error_msg = "Auth timed out";
 
     /* --- Enter PIN state --- */
-    render_loading_screen(screen, "Connecting to plex.tv...");
+    render_status_message(screen, "Connecting to plex.tv...");
     if (plex_auth_create_pin(&pin) != 0) {
         state = AUTH_STATE_ERROR;
         error_msg = "Failed to create PIN";
@@ -267,7 +252,7 @@ AppModule module_auth_run(SDL_Surface *screen)
             /* On first entry: fetch servers (synchronous) */
             if (server_count == 0 && pin.token[0] != '\0') {
                 /* Show loading screen before the blocking call */
-                render_loading_screen(screen, "Loading...");
+                render_status_message(screen, "Loading...");
 
                 PLEX_LOG("[Auth] Fetching servers...\n");
                 if (plex_auth_get_servers(pin.token, servers, &server_count) != 0) {
@@ -325,7 +310,7 @@ AppModule module_auth_run(SDL_Surface *screen)
                 server_count = 0;
                 server_selected = 0;
                 server_scroll = 0;
-                render_loading_screen(screen, "Connecting to plex.tv...");
+                render_status_message(screen, "Connecting to plex.tv...");
                 if (plex_auth_create_pin(&pin) != 0) {
                     state = AUTH_STATE_ERROR;
                     error_msg = "Failed to create PIN";
@@ -359,7 +344,7 @@ AppModule module_auth_run(SDL_Surface *screen)
                 server_count = 0;
                 server_selected = 0;
                 server_scroll = 0;
-                render_loading_screen(screen, "Connecting to plex.tv...");
+                render_status_message(screen, "Connecting to plex.tv...");
                 if (plex_auth_create_pin(&pin) != 0) {
                     error_msg = "Failed to create PIN";
                     /* Stay in error state */

@@ -255,4 +255,8 @@ DialogBox render_dialog_box(SDL_Surface* screen, int box_w, int box_h);
 void render_empty_state(SDL_Surface* screen, const char* message,
                         const char* subtitle, const char* y_button_label);
 
+// Clear the screen, draw one centered status line (e.g. "Connecting...") and flip.
+// For short blocking calls where no other UI is shown.
+void render_status_message(SDL_Surface* screen, const char* message);
+
 #endif

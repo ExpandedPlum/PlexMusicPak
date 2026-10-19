@@ -72,6 +72,8 @@ static int tcp_connect_timeout(const char *host, const char *port_str, int timeo
     freeaddrinfo(res);
 
     if (rc < 0 && errno != EINPROGRESS) {
+        PLEX_LOG_ERROR("[PlexNet] TCP connect failed: %s:%s (%s)\n",
+                       host, port_str, strerror(errno));
         close(fd);
         return -1;
     }
@@ -85,6 +87,8 @@ static int tcp_connect_timeout(const char *host, const char *port_str, int timeo
         int sel = select(fd + 1, NULL, &wfds, NULL, &tv);
         if (sel <= 0) {
             /* timeout or error */
+            PLEX_LOG_ERROR("[PlexNet] TCP connect failed: %s:%s (%s)\n", host, port_str,
+                           sel == 0 ? "timed out" : strerror(errno));
             close(fd);
             return -1;
         }
@@ -92,6 +96,8 @@ static int tcp_connect_timeout(const char *host, const char *port_str, int timeo
         socklen_t errlen = sizeof(err);
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &errlen);
         if (err != 0) {
+            PLEX_LOG_ERROR("[PlexNet] TCP connect failed: %s:%s (%s)\n",
+                           host, port_str, strerror(err));
             close(fd);
             return -1;
         }
@@ -444,7 +450,8 @@ int plex_net_fetch(const char *url, uint8_t *buffer, int buffer_size,
                    const PlexNetOptions *opts)
 {
     int r = plex_net_fetch_internal(url, buffer, buffer_size, opts, 0);
-    for (int i = 0; i < 2 && r < 0; i++) {
+    int retries = (opts && opts->no_retry) ? 0 : 2;
+    for (int i = 0; i < retries && r < 0; i++) {
         usleep(1000000);
         r = plex_net_fetch_internal(url, buffer, buffer_size, opts, 0);
     }

@@ -12,7 +12,8 @@
 #include "plex_log.h"
 
 #define PLEX_TV_API "https://plex.tv/api/v2"
-#define RESP_BUF_SIZE (32 * 1024)
+/* resources lists every device on the account, with relay entries */
+#define RESP_BUF_SIZE (256 * 1024)
 
 /* ------------------------------------------------------------------
  * plex_auth_create_pin
@@ -156,68 +157,52 @@ static int conn_rank(JSON_Object *conn)
 }
 
 /* ------------------------------------------------------------------
- * best_conn_uri — walk connections array, return URI of best-ranked entry.
- * Returns NULL if array is empty or no valid URI found.
+ * ranked_conn_uris — copy the connection URIs into out[], best rank first.
+ * Equal ranks keep plex.tv's order; duplicate URIs are dropped.
+ * Returns the number of URIs written (0 if none).
  * ------------------------------------------------------------------ */
-static const char *best_conn_uri(JSON_Array *conns)
+static int ranked_conn_uris(JSON_Array *conns, char out[][PLEX_MAX_URL], int max)
 {
-    if (!conns) return NULL;
-    size_t n = json_array_get_count(conns);
-    if (n == 0) return NULL;
+    if (!conns) return 0;
 
-    const char *best_uri  = NULL;
-    int         best_score = 999;
+    int ranks[PLEX_MAX_CONNS];
+    int count = 0;
+    size_t n = json_array_get_count(conns);
 
     for (size_t i = 0; i < n; i++) {
         JSON_Object *c = json_array_get_object(conns, i);
         if (!c) continue;
         const char *uri = json_object_get_string(c, "uri");
-        if (!uri || !*uri) continue;
+        if (!uri || !*uri || strlen(uri) >= PLEX_MAX_URL) continue;
 
-        int score = conn_rank(c);
-        if (score < best_score) {
-            best_score = score;
-            best_uri   = uri;
+        bool dup = false;
+        for (int j = 0; j < count; j++)
+            if (strcmp(out[j], uri) == 0) { dup = true; break; }
+        if (dup) continue;
+
+        /* Insertion sort: find the slot after every entry ranked <= this one */
+        int rank = conn_rank(c);
+        int pos = count;
+        while (pos > 0 && ranks[pos - 1] > rank) pos--;
+        if (pos >= max) continue;   /* list full of better-ranked URIs */
+
+        int last = (count < max) ? count : max - 1;
+        for (int j = last; j > pos; j--) {
+            memcpy(out[j], out[j - 1], PLEX_MAX_URL);
+            ranks[j] = ranks[j - 1];
         }
+        strcpy(out[pos], uri);
+        ranks[pos] = rank;
+        if (count < max) count++;
     }
-    return best_uri;
-}
-
-/* ------------------------------------------------------------------
- * best_nonlocal_uri — walk connections array, return URI of best-ranked
- * entry where local != 1. Covers both external plex.direct and relay.
- * Returns NULL if all connections are local.
- * ------------------------------------------------------------------ */
-static const char *best_nonlocal_uri(JSON_Array *conns)
-{
-    if (!conns) return NULL;
-    size_t n = json_array_get_count(conns);
-    if (n == 0) return NULL;
-
-    const char *best_uri   = NULL;
-    int         best_score = 999;
-
-    for (size_t i = 0; i < n; i++) {
-        JSON_Object *c = json_array_get_object(conns, i);
-        if (!c) continue;
-        if (json_object_get_boolean(c, "local") == 1) continue;
-        const char *uri = json_object_get_string(c, "uri");
-        if (!uri || !*uri) continue;
-
-        int score = conn_rank(c);
-        if (score < best_score) {
-            best_score = score;
-            best_uri   = uri;
-        }
-    }
-    return best_uri;
+    return count;
 }
 
 /* ------------------------------------------------------------------
  * plex_auth_get_servers
- * GET https://plex.tv/api/v2/resources?includeHttps=1
+ * GET https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1
  * Filters for provides containing "server".
- * Picks best-ranked connection URI (local > non-relay > relay, HTTPS
+ * Keeps every connection URI, ranked local > remote > relay (HTTPS
  * preferred within tier).
  * ------------------------------------------------------------------ */
 int plex_auth_get_servers(const char *token, PlexServer servers[], int *count)
@@ -235,7 +220,7 @@ int plex_auth_get_servers(const char *token, PlexServer servers[], int *count)
         .timeout_sec = 15
     };
 
-    int n = plex_net_fetch(PLEX_TV_API "/resources?includeHttps=1",
+    int n = plex_net_fetch(PLEX_TV_API "/resources?includeHttps=1&includeRelay=1",
                            buf, RESP_BUF_SIZE, &opts);
     if (n <= 0) {
         PLEX_LOG_ERROR("[PlexAuth] get_servers: fetch failed\n");
@@ -266,27 +251,25 @@ int plex_auth_get_servers(const char *token, PlexServer servers[], int *count)
         const char *provides = json_object_get_string(res, "provides");
         if (!provides || !strstr(provides, "server")) continue;
 
-        /* Pick best-ranked connection URI */
-        JSON_Array  *conns     = json_object_get_array(res, "connections");
-        const char  *uri       = best_conn_uri(conns);
-        if (!uri) continue;
-
         PlexServer *sv = &servers[*count];
         memset(sv, 0, sizeof(*sv));
 
-        const char *name      = json_object_get_string(res, "name");
-        const char *cid       = json_object_get_string(res, "clientIdentifier");
-        int owned             = json_object_get_boolean(res, "owned");  /* -1 = missing */
-        const char *nonlocal_uri = best_nonlocal_uri(conns);
+        JSON_Array *conns = json_object_get_array(res, "connections");
+        sv->conn_count = ranked_conn_uris(conns, sv->conn_urls, PLEX_MAX_CONNS);
+        if (sv->conn_count == 0) continue;
+
+        const char *name = json_object_get_string(res, "name");
+        const char *cid  = json_object_get_string(res, "clientIdentifier");
+        int owned        = json_object_get_boolean(res, "owned");  /* -1 = missing */
 
         if (name) strncpy(sv->name, name, sizeof(sv->name) - 1);
         if (cid)  strncpy(sv->id,   cid,  sizeof(sv->id) - 1);
-        strncpy(sv->url, uri, sizeof(sv->url) - 1);
-        if (nonlocal_uri) strncpy(sv->relay_url, nonlocal_uri, sizeof(sv->relay_url) - 1);
         sv->owned = (owned == 1);
 
-        PLEX_LOG("[PlexAuth] server[%d]: name=%s url=%s relay_url=%s conns=%zu\n",
-                 *count, sv->name, sv->url, sv->relay_url, json_array_get_count(conns));
+        PLEX_LOG("[PlexAuth] server[%d]: name=%s conns=%d\n",
+                 *count, sv->name, sv->conn_count);
+        for (int c = 0; c < sv->conn_count; c++)
+            PLEX_LOG("[PlexAuth]   conn[%d]: %s\n", c, sv->conn_urls[c]);
 
         (*count)++;
     }
@@ -296,10 +279,30 @@ int plex_auth_get_servers(const char *token, PlexServer servers[], int *count)
 }
 
 /* ------------------------------------------------------------------
+ * plex_auth_apply_server
+ * ------------------------------------------------------------------ */
+void plex_auth_apply_server(PlexConfig *cfg, const PlexServer *sv)
+{
+    if (!cfg || !sv) return;
+
+    strncpy(cfg->server_name, sv->name, PLEX_MAX_STR - 1);
+    cfg->server_name[PLEX_MAX_STR - 1] = '\0';
+    strncpy(cfg->server_id, sv->id, PLEX_MAX_STR - 1);
+    cfg->server_id[PLEX_MAX_STR - 1] = '\0';
+
+    memcpy(cfg->conn_urls, sv->conn_urls, sizeof(cfg->conn_urls));
+    cfg->conn_count = sv->conn_count;
+    if (cfg->conn_count > 0) {
+        strncpy(cfg->server_url, cfg->conn_urls[0], PLEX_MAX_URL - 1);
+        cfg->server_url[PLEX_MAX_URL - 1] = '\0';
+    }
+}
+
+/* ------------------------------------------------------------------
  * plex_auth_refresh_server_urls
  * GET https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1
- * Finds the resource matching cfg->server_id, then updates
- * cfg->server_url and cfg->relay_url with fresh connection URIs.
+ * Finds the resource matching cfg->server_id, then replaces
+ * cfg->conn_urls with fresh connection URIs.
  * Returns 0 on success, -1 on failure (cfg unchanged).
  * ------------------------------------------------------------------ */
 int plex_auth_refresh_server_urls(PlexConfig *cfg)
@@ -347,26 +350,19 @@ int plex_auth_refresh_server_urls(PlexConfig *cfg)
         JSON_Object *res = json_array_get_object(arr, i);
         if (!res) continue;
 
-        const char *mid = json_object_get_string(res, "machineIdentifier");
-        if (!mid || strcmp(mid, cfg->server_id) != 0) continue;
+        /* v2 resources identify servers by clientIdentifier */
+        const char *cid = json_object_get_string(res, "clientIdentifier");
+        if (!cid) cid = json_object_get_string(res, "machineIdentifier");
+        if (!cid || strcmp(cid, cfg->server_id) != 0) continue;
 
-        JSON_Array *conns = json_object_get_array(res, "connections");
-        const char *new_server = best_conn_uri(conns);
-        const char *new_relay  = best_nonlocal_uri(conns);
-
-        if (new_server) {
-            strncpy(cfg->server_url, new_server, sizeof(cfg->server_url) - 1);
-            cfg->server_url[sizeof(cfg->server_url) - 1] = '\0';
-        }
-        if (new_relay) {
-            strncpy(cfg->relay_url, new_relay, sizeof(cfg->relay_url) - 1);
-            cfg->relay_url[sizeof(cfg->relay_url) - 1] = '\0';
-        }
-
-        if (new_server || new_relay) {
+        char conns_buf[PLEX_MAX_CONNS][PLEX_MAX_URL];
+        int conn_count = ranked_conn_uris(json_object_get_array(res, "connections"),
+                                          conns_buf, PLEX_MAX_CONNS);
+        if (conn_count > 0) {
+            memcpy(cfg->conn_urls, conns_buf, sizeof(cfg->conn_urls));
+            cfg->conn_count = conn_count;
             plex_config_save(cfg);
-            PLEX_LOG("[Auth] server URLs refreshed: server_url=%s relay_url=%s\n",
-                     cfg->server_url, cfg->relay_url);
+            PLEX_LOG("[Auth] server URLs refreshed: %d connections\n", conn_count);
         }
 
         found = 1;
@@ -376,10 +372,53 @@ int plex_auth_refresh_server_urls(PlexConfig *cfg)
     json_value_free(root);
 
     if (!found) {
-        PLEX_LOG("[Auth] server URL refresh failed (using cached)\n");
+        PLEX_LOG("[Auth] server URL refresh failed (server not in resources, using cached)\n");
         return -1;
     }
 
     return 0;
 }
 
+/* ------------------------------------------------------------------
+ * plex_auth_select_connection
+ * Probe {conn}/identity for each cfg->conn_urls entry in rank order and
+ * use the first that answers as cfg->server_url for this session.
+ * ------------------------------------------------------------------ */
+int plex_auth_select_connection(PlexConfig *cfg)
+{
+    if (!cfg || cfg->conn_count <= 0) return -1;
+
+    uint8_t probe_buf[4096];
+    /* Short timeout and no retries: an unreachable address should cost
+     * seconds, not the full 15s default with retries. */
+    PlexNetOptions probe_opts = {
+        .method      = PLEX_HTTP_GET,
+        .body        = NULL,
+        .token       = cfg->token,
+        .timeout_sec = 2,
+        .no_persist  = true,
+        .no_retry    = true
+    };
+
+    for (int i = 0; i < cfg->conn_count; i++) {
+        char identity_url[PLEX_MAX_URL + 16];
+        snprintf(identity_url, sizeof(identity_url), "%s/identity", cfg->conn_urls[i]);
+
+        if (plex_net_fetch(identity_url, probe_buf, (int)sizeof(probe_buf), &probe_opts) > 0) {
+            strncpy(cfg->server_url, cfg->conn_urls[i], PLEX_MAX_URL - 1);
+            cfg->server_url[PLEX_MAX_URL - 1] = '\0';
+            PLEX_LOG("[Auth] using connection %d/%d: %s\n",
+                     i + 1, cfg->conn_count, cfg->server_url);
+            return 0;
+        }
+        PLEX_LOG("[Auth] connection %d/%d unreachable: %s\n",
+                 i + 1, cfg->conn_count, cfg->conn_urls[i]);
+    }
+
+    /* Nothing answered: fall back to the best-ranked URL so browse shows its
+     * normal network error and retry flow. */
+    strncpy(cfg->server_url, cfg->conn_urls[0], PLEX_MAX_URL - 1);
+    cfg->server_url[PLEX_MAX_URL - 1] = '\0';
+    PLEX_LOG_ERROR("[Auth] no connection reachable; using %s\n", cfg->server_url);
+    return -1;
+}

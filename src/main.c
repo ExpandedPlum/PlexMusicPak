@@ -43,36 +43,6 @@ PlexConfig *plex_config_get_mutable(void)
     return &g_config;
 }
 
-/* Probe server_url; if unreachable and relay_url is set, switch for this session. */
-static void apply_relay_fallback(PlexConfig *cfg)
-{
-    PLEX_LOG("[Main] apply_relay_fallback: server_url=%s relay_url=%s\n",
-             cfg->server_url, cfg->relay_url);
-    if (!plex_config_is_valid(cfg) || cfg->relay_url[0] == '\0') return;
-
-    char identity_url[PLEX_MAX_URL + 16];
-    snprintf(identity_url, sizeof(identity_url), "%s/identity", cfg->server_url);
-
-    uint8_t probe_buf[4096];
-    /* timeout_sec=1: fail fast if primary URL is unreachable.
-     * PlexNetOptions has no max_retries field; plex_net.c handles retries
-     * internally but the short timeout limits total wait time. */
-    PlexNetOptions probe_opts = {
-        .method      = PLEX_HTTP_GET,
-        .body        = NULL,
-        .token       = cfg->token,
-        .timeout_sec = 1
-    };
-    int r = plex_net_fetch(identity_url, probe_buf, (int)sizeof(probe_buf), &probe_opts);
-    if (r > 0) {
-        PLEX_LOG("[Main] server_url reachable: %s\n", cfg->server_url);
-    } else {
-        PLEX_LOG("[Main] server_url unreachable, switching to relay_url: %s\n", cfg->relay_url);
-        strncpy(cfg->server_url, cfg->relay_url, sizeof(cfg->server_url) - 1);
-        cfg->server_url[sizeof(cfg->server_url) - 1] = '\0';
-    }
-}
-
 static void sig_handler(int sig) {
     switch (sig) {
     case SIGINT:
@@ -126,9 +96,10 @@ int main(int argc, char *argv[]) {
     if (!g_config.offline_mode) {
         SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x12, 0x12, 0x12));
         GFX_flip(screen);
-        if (plex_config_is_valid(&g_config))
+        if (plex_config_is_valid(&g_config)) {
             plex_auth_refresh_server_urls(&g_config); /* best-effort; failure falls through to cached */
-        apply_relay_fallback(&g_config);
+            plex_auth_select_connection(&g_config);
+        }
     }
 
     /*
@@ -149,7 +120,7 @@ int main(int argc, char *argv[]) {
             if (next == MODULE_BROWSE && !g_config.offline_mode) {
                 SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x12, 0x12, 0x12));
                 GFX_flip(screen);
-                apply_relay_fallback(&g_config);
+                plex_auth_select_connection(&g_config);
             }
             break;
         case MODULE_BROWSE:

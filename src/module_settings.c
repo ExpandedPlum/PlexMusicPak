@@ -481,12 +481,9 @@ AppModule module_settings_run(SDL_Surface *screen)
                 dirty = 1;
             } else if (PAD_justPressed(BTN_A)) {
                 PlexConfig *cfg = plex_config_get_mutable();
-                strncpy(cfg->server_url, servers[server_selected].url, PLEX_MAX_URL - 1);
-                cfg->server_url[PLEX_MAX_URL - 1] = '\0';
-                strncpy(cfg->server_name, servers[server_selected].name, PLEX_MAX_STR - 1);
-                cfg->server_name[PLEX_MAX_STR - 1] = '\0';
-                strncpy(cfg->server_id, servers[server_selected].id, PLEX_MAX_STR - 1);
-                cfg->server_id[PLEX_MAX_STR - 1] = '\0';
+                plex_auth_apply_server(cfg, &servers[server_selected]);
+                render_loading(screen, "Connecting to server...");
+                plex_auth_select_connection(cfg);
                 plex_config_save(cfg);
 
                 /* Brief confirmation message */

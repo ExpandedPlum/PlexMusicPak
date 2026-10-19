@@ -14,6 +14,7 @@ typedef struct {
     const char    *token;           /* X-Plex-Token value (NULL if not needed) */
     int            timeout_sec;     /* 0 = default (15s) */
     bool           no_persist;      /* true = bypass s_persist_ctx pool */
+    bool           no_retry;        /* true = single attempt (plex_net_fetch only) */
 } PlexNetOptions;
 
 /*

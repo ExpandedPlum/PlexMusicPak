@@ -36,6 +36,7 @@ PlexMusic.pak is a music player for the TrimUI Brick that streams music from a P
 **Auth & setup**
 - PIN-based Plex authentication (plex.tv/link, no password entry needed)
 - Supports multiple Plex servers — pick one on first launch
+- Connects however the server is reachable: tries its home network address, then its internet address, then Plex Relay (works from networks that block your LAN, at Plex's relay speed cap — fine for Opus transcodes, too slow for original FLAC)
 - Auth and settings saved to SD card; no re-login needed after reboot
 
 **Quality of life**

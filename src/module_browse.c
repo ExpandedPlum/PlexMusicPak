@@ -16,6 +16,7 @@
 #include "module_common.h"
 #include "plex_api.h"
 #include "plex_art.h"
+#include "plex_auth.h"
 #include "plex_config.h"
 #include "plex_models.h"
 #include "plex_queue.h"
@@ -75,6 +76,13 @@ static struct {
     /* cfg copy (main thread writes before kick; worker reads once at start) */
     char             server_url[PLEX_MAX_URL];
     char             token[PLEX_MAX_STR];
+    char             conn_urls[PLEX_MAX_CONNS][PLEX_MAX_URL];
+    PlexConnKind     conn_kinds[PLEX_MAX_CONNS];
+    int              conn_count;
+    /* set by worker when it switched connection; main thread adopts it */
+    bool             switched;
+    char             switched_url[PLEX_MAX_URL];
+    PlexConnKind     switched_kind;
     /* inputs (only the relevant one is used per type) */
     int              library_id;
     int              artist_rating_key;
@@ -96,6 +104,8 @@ static struct {
 
 static LoadState browse_load_poll(void);
 
+static int browse_load_fetch(const PlexConfig *cfg, BrowseState type, int my_generation);
+
 static void *browse_load_worker(void *arg)
 {
     (void)arg;
@@ -106,10 +116,54 @@ static void *browse_load_worker(void *arg)
     pthread_mutex_lock(&s_load.lock);
     strncpy(cfg.server_url, s_load.server_url, sizeof(cfg.server_url) - 1);
     strncpy(cfg.token,      s_load.token,      sizeof(cfg.token) - 1);
+    memcpy(cfg.conn_urls,  s_load.conn_urls,  sizeof(cfg.conn_urls));
+    memcpy(cfg.conn_kinds, s_load.conn_kinds, sizeof(cfg.conn_kinds));
+    cfg.conn_count   = s_load.conn_count;
     BrowseState type = s_load.type;
     my_generation    = s_load.generation;
     pthread_mutex_unlock(&s_load.lock);
 
+    int rc = browse_load_fetch(&cfg, type, my_generation);
+
+    /* The network may have changed since startup (e.g. left home Wi-Fi):
+     * if another of the server's connections answers, retry on it once. */
+    if (rc != 0 && !s_load.cancel && cfg.conn_count > 1) {
+        char failed_url[PLEX_MAX_URL];
+        strncpy(failed_url, cfg.server_url, sizeof(failed_url) - 1);
+        failed_url[sizeof(failed_url) - 1] = '\0';
+
+        if (plex_auth_select_connection(&cfg) == 0 &&
+            strcmp(cfg.server_url, failed_url) != 0 && !s_load.cancel) {
+            PLEX_LOG("[Browse] switched connection after failure: %s\n", cfg.server_url);
+            rc = browse_load_fetch(&cfg, type, my_generation);
+
+            pthread_mutex_lock(&s_load.lock);
+            if (my_generation == s_load.generation) {
+                s_load.switched      = true;
+                s_load.switched_kind = cfg.server_kind;
+                strncpy(s_load.switched_url, cfg.server_url, sizeof(s_load.switched_url) - 1);
+                s_load.switched_url[sizeof(s_load.switched_url) - 1] = '\0';
+            }
+            pthread_mutex_unlock(&s_load.lock);
+        }
+    }
+
+    pthread_mutex_lock(&s_load.lock);
+    if (my_generation == s_load.generation) {
+        if (s_load.cancel || rc != 0)
+            s_load.status = LOAD_ERROR;
+        else
+            s_load.status = LOAD_DONE;
+    }
+    pthread_mutex_unlock(&s_load.lock);
+
+    return NULL;
+}
+
+/* Run the request for one load type against cfg->server_url. */
+static int browse_load_fetch(const PlexConfig *cfg_in, BrowseState type, int my_generation)
+{
+    const PlexConfig cfg = *cfg_in;   /* the cases below take &cfg */
     int rc = 0;
     switch (type) {
         case BROWSE_LIBRARIES:
@@ -184,17 +238,7 @@ static void *browse_load_worker(void *arg)
         default:
             rc = -1;
     }
-
-    pthread_mutex_lock(&s_load.lock);
-    if (my_generation == s_load.generation) {
-        if (s_load.cancel || rc != 0)
-            s_load.status = LOAD_ERROR;
-        else
-            s_load.status = LOAD_DONE;
-    }
-    pthread_mutex_unlock(&s_load.lock);
-
-    return NULL;
+    return rc;
 }
 
 /* Populate s_load, (re-)join any existing thread, spawn a new one. */
@@ -224,6 +268,10 @@ static void browse_load_kick(BrowseState type, const PlexConfig *cfg,
     strncpy(s_load.token,      cfg->token,      sizeof(s_load.token) - 1);
     s_load.server_url[sizeof(s_load.server_url) - 1] = '\0';
     s_load.token[sizeof(s_load.token) - 1]           = '\0';
+    memcpy(s_load.conn_urls,  cfg->conn_urls,  sizeof(s_load.conn_urls));
+    memcpy(s_load.conn_kinds, cfg->conn_kinds, sizeof(s_load.conn_kinds));
+    s_load.conn_count = cfg->conn_count;
+    s_load.switched   = false;
     s_load.library_id        = library_id;
     s_load.artist_rating_key = artist_rating_key;
     s_load.album_rating_key  = album_rating_key;
@@ -244,11 +292,19 @@ static void browse_load_kick(BrowseState type, const PlexConfig *cfg,
     }
 }
 
-/* Read current worker status (thread-safe). */
+/* Read current worker status (thread-safe). Main thread only: also adopts
+ * a connection the worker switched to, so later requests use it. */
 static LoadState browse_load_poll(void)
 {
     pthread_mutex_lock(&s_load.lock);
     LoadState st = s_load.status;
+    if (s_load.switched && st != LOAD_RUNNING) {
+        PlexConfig *g = plex_config_get_mutable();
+        strncpy(g->server_url, s_load.switched_url, sizeof(g->server_url) - 1);
+        g->server_url[sizeof(g->server_url) - 1] = '\0';
+        g->server_kind  = s_load.switched_kind;
+        s_load.switched = false;
+    }
     pthread_mutex_unlock(&s_load.lock);
     return st;
 }

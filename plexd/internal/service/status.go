@@ -25,7 +25,8 @@ type PlayerStatus struct {
 	// Opus bitrate when the current track streams transcoded, 0 for the
 	// original file (streamed or downloaded).
 	TranscodeKbps int    `json:"transcodeKbps"`
-	Local         bool   `json:"local"` // playing a downloaded file
+	Local         bool   `json:"local"`    // playing a downloaded file
+	Prefetched    bool   `json:"prefetch"` // playing a copy fetched ahead
 	Error         string `json:"error,omitempty"`
 }
 
@@ -65,6 +66,8 @@ func (s *Service) Status() Status {
 				ps.Local = tr.Source != "" && tr.Source == t.LocalPath
 				if tr.SourceAt != nil {
 					ps.TranscodeKbps = s.Plex.StreamKbps()
+				} else if p := s.pfPlaying; p != nil && tr.Source == p.path {
+					ps.Prefetched, ps.TranscodeKbps = true, p.kbps
 				}
 			}
 			if snap.Error != "" {

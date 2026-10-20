@@ -24,6 +24,19 @@ type fakePlex struct {
 	scrobbles []string
 	offsets   []string // transcode start offsets
 	tokens    []string
+	parts     []string // track file requests
+}
+
+func (f *fakePlex) count(list *[]string, v string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, x := range *list {
+		if x == v {
+			n++
+		}
+	}
+	return n
 }
 
 func (f *fakePlex) record(list *[]string, v string) {
@@ -49,6 +62,7 @@ func newFakePlex(t *testing.T, mp3, opus string) *fakePlex {
 	mux.HandleFunc("/identity", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("{}")) })
 	mux.HandleFunc("/library/parts/", func(w http.ResponseWriter, r *http.Request) {
 		f.record(&f.tokens, r.Header.Get("X-Plex-Token"))
+		f.record(&f.parts, r.URL.Path)
 		http.ServeFile(w, r, mp3)
 	})
 	mux.HandleFunc("/audio/:/transcode/universal/start", func(w http.ResponseWriter, r *http.Request) {
@@ -116,7 +130,7 @@ func newTestService(t *testing.T) (*Service, *fakePlex, string) {
 		},
 	})
 	s := New(Options{ConfigPath: cfgPath, SettingsPath: filepath.Join(dir, "plexd.json"),
-		FFmpeg: "ffmpeg", Output: "null"})
+		CacheDir: filepath.Join(dir, "cache"), FFmpeg: "ffmpeg", Output: "null"})
 	if err := s.StartProxy(); err != nil {
 		t.Fatal(err)
 	}
@@ -232,5 +246,32 @@ func TestLocalFileAndControls(t *testing.T) {
 	}
 	if !strings.Contains(s.Status().Version, "dev") {
 		t.Fatal("version")
+	}
+}
+
+func TestNextTrackIsPrefetched(t *testing.T) {
+	s, f, _ := newTestService(t)
+	tracks := []Track{
+		{RatingKey: 1, DurationMs: 2000, MediaKey: "/library/parts/1/one.mp3"},
+		{RatingKey: 2, DurationMs: 2000, MediaKey: "/library/parts/2/two.mp3"},
+	}
+	if err := s.SetQueue(tracks, 0, false); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "second track playing", 8*time.Second, func() bool {
+		st := s.Status().Player
+		return st.Track.RatingKey == 2 && st.State == "playing"
+	})
+	if !s.Status().Player.Prefetched {
+		t.Fatal("the second track should play from its prefetched copy")
+	}
+	// Fetched once ahead of time; the player read the local copy.
+	if n := f.count(&f.parts, "/library/parts/2/two.mp3"); n != 1 {
+		t.Fatalf("track 2 requested %d times", n)
+	}
+	s.Stop()
+	left, _ := filepath.Glob(filepath.Join(s.cacheDir, "*"))
+	if len(left) != 0 {
+		t.Fatalf("stop should delete prefetched files: %v", left)
 	}
 }

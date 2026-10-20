@@ -34,6 +34,7 @@ const (
 )
 
 type Options struct {
+	CacheDir     string // where the next track is fetched ahead; "" = don't
 	ConfigPath   string // the UI's config.json
 	SettingsPath string // plexd.json
 	UserData     string // NextUI's per-platform userdata dir (where .asoundrc lives)
@@ -48,6 +49,7 @@ type Service struct {
 
 	proxyBase string
 	rng       *rand.Rand
+	cacheDir  string
 
 	mu           sync.Mutex
 	q            *Queue
@@ -61,6 +63,8 @@ type Service struct {
 	lastBusy     time.Time
 	trans        *time.Timer // pending resume after an app switch
 	volTimer     *time.Timer
+	pf           *prefetchJob // next track, downloading or downloaded
+	pfPlaying    *prefetchJob // prefetched file the current track plays from
 
 	quit       chan struct{}
 	onSettings func(Settings)
@@ -82,7 +86,9 @@ func New(opts Options) *Service {
 		rng:      rand.New(rand.NewSource(time.Now().UnixNano())),
 		quit:     make(chan struct{}),
 		lastBusy: time.Now(),
+		cacheDir: opts.CacheDir,
 	}
+	s.clearCache()
 	if opts.UserData != "" {
 		s.game = gameaudio.New(opts.UserData)
 		if conf := os.Getenv("PLEXD_ASOUND_CONF"); conf != "" { // tests
@@ -132,6 +138,7 @@ func (s *Service) Run() {
 		case now := <-tick.C:
 			snap := s.Eng.Snapshot()
 			s.report(snap, now)
+			s.maybePrefetch(snap)
 			state := snap.State
 			if s.inTransition() {
 				// Keep games muted while the music is held for an app
@@ -226,6 +233,7 @@ func (s *Service) SetQueue(tracks []Track, start int, shuffle bool) error {
 	if shuffle {
 		q.ToggleShuffle(s.rng)
 	}
+	s.dropPrefetches()
 	s.mu.Lock()
 	s.q = q
 	s.queueID++
@@ -271,6 +279,12 @@ func (s *Service) media(t Track) (*player.Media, error) {
 		Duration: float64(t.DurationMs) / 1000,
 	}
 	tr := player.Track{Duration: m.Duration}
+	if p := s.takePrefetch(t.RatingKey); p != nil {
+		tr.Source = p.path
+		m.Tracks = []player.Track{tr}
+		return m, nil
+	}
+	s.releasePlaying(nil)
 	if t.LocalPath != "" {
 		if _, err := os.Stat(t.LocalPath); err == nil {
 			tr.Source = t.LocalPath
@@ -388,6 +402,7 @@ func (s *Service) CycleRepeat() {
 func (s *Service) Stop() {
 	s.endTransition()
 	s.stopCurrent("stopped")
+	s.dropPrefetches()
 	s.mu.Lock()
 	s.q = nil
 	s.queueID++

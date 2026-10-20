@@ -16,8 +16,20 @@ type Hotkeys struct {
 	Next    string `json:"next"`
 }
 
+// Earphone media keys, always bound alongside the configurable buttons so
+// they work while a game runs (the UI handles them while it's in front).
+const (
+	mediaToggle = "PLAYPAUSE,PLAYCD,PAUSECD"
+	mediaPrev   = "PREVIOUSSONG"
+	mediaNext   = "NEXTSONG"
+)
+
 func (h Hotkeys) Specs() map[string]string {
-	return map[string]string{"toggle": h.Toggle, "prev": h.Prev, "next": h.Next}
+	return map[string]string{
+		"toggle": h.Toggle + "," + mediaToggle,
+		"prev":   h.Prev + "," + mediaPrev,
+		"next":   h.Next + "," + mediaNext,
+	}
 }
 
 // Settings are plexd's own, kept next to the UI's config.json.

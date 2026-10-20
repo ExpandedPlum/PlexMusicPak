@@ -66,6 +66,21 @@ func (q *Queue) HasNext() bool {
 
 func (q *Queue) HasPrev() bool { return q != nil && q.Pos > 0 }
 
+// Peek returns the track Next would move to, without moving: nil at the end
+// of the queue, and on Repeat One (the current track plays again).
+func (q *Queue) Peek() *Track {
+	if q == nil || len(q.Order) == 0 || q.Repeat == RepeatOne {
+		return nil
+	}
+	if q.Pos < len(q.Order)-1 {
+		return &q.Tracks[q.Order[q.Pos+1]]
+	}
+	if q.Repeat == RepeatAll {
+		return &q.Tracks[q.Order[0]]
+	}
+	return nil
+}
+
 // Next moves to the following track, wrapping around on Repeat All.
 func (q *Queue) Next() bool {
 	if !q.HasNext() {

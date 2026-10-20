@@ -155,13 +155,15 @@ func serve() {
 	signal.Ignore(syscall.SIGHUP, syscall.SIGPIPE)
 
 	cfgPath := env("PLEXD_CONFIG", plex.ConfigPath())
+	userData := env("PLEXD_USERDATA", env("USERDATA_PATH", os.Getenv("HOME")))
 	opts := service.Options{
+		CacheDir:     env("PLEXD_CACHE", filepath.Join(userData, "plexmusic", "tmp")),
 		ConfigPath:   cfgPath,
 		SettingsPath: env("PLEXD_SETTINGS", filepath.Join(filepath.Dir(cfgPath), "plexd.json")),
 		FFmpeg:       env("PLEXD_FFMPEG", defaultFFmpeg()),
 		Output:       env("PLEXD_AUDIO_OUT", "alsa"),
 		// NextUI sets HOME to the userdata dir; ALSA reads $HOME/.asoundrc.
-		UserData: env("PLEXD_USERDATA", env("USERDATA_PATH", os.Getenv("HOME"))),
+		UserData: userData,
 	}
 	log.Printf("plexd %s starting (config=%s ffmpeg=%s out=%s)", service.Version, opts.ConfigPath, opts.FFmpeg, opts.Output)
 	if err := player.Probe(context.Background(), opts.FFmpeg); err != nil {

@@ -22,6 +22,8 @@ var buttonCodes = map[string]uint16{
 	"L1": 310, "R1": 311, "L2": 312, "R2": 313,
 	"SELECT": 314, "START": 315, "MENU": 316,
 	"FN1": 317, "FN2": 318, "L3": 317, "R3": 318,
+	// Media keys on USB-C and Bluetooth (AVRCP) earphones
+	"NEXTSONG": 163, "PLAYPAUSE": 164, "PREVIOUSSONG": 165, "PLAYCD": 200, "PAUSECD": 201,
 }
 
 type Binding struct {
@@ -137,6 +139,10 @@ func (l *Listener) read(path string, f *os.File) {
 		}
 	}
 }
+
+// Handle feeds one key event (value 1 = press, 0 = release, 2 = repeat), as
+// read from an input device; exported for tests elsewhere.
+func (l *Listener) Handle(code uint16, val int32) { l.handle(code, val) }
 
 func (l *Listener) handle(code uint16, val int32) {
 	l.mu.Lock()

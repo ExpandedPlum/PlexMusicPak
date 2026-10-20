@@ -1,0 +1,81 @@
+name: CI
+
+# Builds the pak on every push and pull request, without publishing it, so a
+# change is known to compile for the device before a release.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  plexd:
+    name: plexd tests
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: plexd/go.mod
+          cache-dependency-path: plexd/go.sum
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Lint
+        working-directory: plexd
+        run: test -z "$(gofmt -l .)" && go vet ./...
+
+      - name: Test
+        working-directory: plexd
+        run: go test -race ./...
+
+      - name: Shell syntax
+        run: for f in launch.sh scripts/*.sh; do sh -n "$f" || exit 1; done
+
+  build:
+    name: build pak
+    # The NextUI toolchain image is x86_64.
+    runs-on: ubuntu-24.04
+    needs: plexd
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: opencode/git/paks
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: opencode/git/paks/plexd/go.mod
+          cache-dependency-path: opencode/git/paks/plexd/go.sum
+
+      - name: Cache ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: build/ffmpeg-bin
+          key: ffmpeg-tg5040-${{ hashFiles('opencode/git/paks/scripts/build-ffmpeg.sh') }}
+
+      - name: Pull toolchain image
+        run: docker pull ghcr.io/loveretro/tg5040-toolchain:latest
+
+      - name: Build
+        env:
+          FFMPEG_CACHE: ${{ github.workspace }}/build/ffmpeg-bin
+        run: sh opencode/git/paks/scripts/build-pak.sh 0.0.0-dev
+
+      - name: Check contents
+        run: |
+          for f in launch.sh pak.json res/font.ttf bin/tg5040/plexmusic.elf bin/tg5040/libmsettings.so \
+                   bin/tg5040/plexd bin/tg5040/ffmpeg licenses/THIRD_PARTY.md; do
+            unzip -l PlexMusic.pak.zip | grep -q " $f\$" || { echo "missing $f"; exit 1; }
+          done
+          file opencode/git/paks/bin/tg5040/plexmusic.elf opencode/git/paks/bin/tg5040/plexd opencode/git/paks/bin/tg5040/ffmpeg
+
+      - name: Upload pak
+        uses: actions/upload-artifact@v4
+        with:
+          name: PlexMusic.pak.zip
+          path: PlexMusic.pak.zip

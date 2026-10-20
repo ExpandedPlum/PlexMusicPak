@@ -39,15 +39,22 @@ PlexMusic.pak is a music player for the TrimUI Brick that streams music from a P
 - Connects however the server is reachable: tries its home network address, then its internet address, then Plex Relay (works from networks that block your LAN, at Plex's relay speed cap — fine for Opus transcodes, too slow for original FLAC)
 - Auth and settings saved to SD card; no re-login needed after reboot
 
+**Keeps playing while you game**
+- Music plays in a small background service (plexd), so it keeps going after you quit the app, in the NextUI menu, and inside games
+- Games are muted while music plays and get their sound back when you pause (Settings → Mute Games While Playing)
+- In-game controls while a game runs: FN1 or SELECT+START = play/pause, SELECT+L1 / SELECT+R1 = previous / next track (Settings → In-Game Controls)
+- Music pauses for a few seconds whenever an app starts or exits, to skip NextUI's full-volume blip, and pauses before the device sleeps
+- Plugging in or unplugging USB-C or Bluetooth audio moves the music to the new output
+
 **Quality of life**
-- Background playback — press B from Now Playing to return to browse while audio keeps playing
+- Background playback — press B from Now Playing to return to browse while audio keeps playing; X stops playback
 - Now Playing screen: shuffle (L2), repeat All/One/Off (R2), favorite (Y)
 - D-pad left/right: tap = skip track, hold = seek ±5 s
 - Queue auto-advances through an album during background playback
 - Configurable screen sleep timeout
 - MENU+SELECT wakes the screen from sleep when pocket lockout is enabled
-- MENU+START quits from anywhere instantly
-- Settings: switch server, sign out, change library, seek interval, transcode options
+- MENU+START quits from anywhere instantly (music keeps playing; press X on Now Playing first to stop it)
+- Settings: switch server, sign out, change library, transcode options, game muting, in-game controls
 
 ## Installation
 
@@ -60,6 +67,9 @@ Tools/tg5040/PlexMusic.pak/
   bin/tg5040/
     plexmusic.elf
     libmsettings.so
+    plexd
+    ffmpeg
+  licenses/
 ```
 
 1. Copy the above directory structure to your SD card under `Tools/tg5040/`.
@@ -91,6 +101,17 @@ Tools/tg5040/PlexMusic.pak/
 | L2 | Toggle shuffle |
 | R2 | Cycle repeat (Off → All → One) |
 | Y | Toggle favorite |
+| X | Stop playback |
+
+**In a game or the NextUI menu** (while music is loaded)
+
+| Button | Action |
+|---|---|
+| FN1, or SELECT + START | Play / Pause |
+| SELECT + L1 | Previous track |
+| SELECT + R1 | Next track |
+
+If Audiobookshelf.pak is also installed, its in-game buttons are the same; each only responds while it has something loaded, so stop one before using the other.
 
 **Global**
 
@@ -112,6 +133,8 @@ Auth config is saved to SD card — subsequent launches go straight to browse.
 ## Log and Config Files
 
 - **Log:** `/mnt/SDCARD/.userdata/tg5040/logs/plexmusic.txt`
+- **Player service log:** `/mnt/SDCARD/.userdata/tg5040/logs/plexd.txt`
+- **Player service settings:** `/mnt/SDCARD/.userdata/shared/plexmusic/plexd.json`
 - **Config:** `/mnt/SDCARD/.userdata/shared/plexmusic/config.json`
   - Contains token, server URL, stream quality setting
 - **Favorites:** `/mnt/SDCARD/.userdata/shared/plexmusic/favorites.json`
@@ -122,7 +145,15 @@ To sign out or switch servers, delete `config.json`.
 
 ## Building from Source
 
-Requires the `ghcr.io/loveretro/tg5040-toolchain` Docker image (run via Podman).
+The CI workflow (`.github/workflows/ci.yml`) builds the whole pak on every push
+and uploads `PlexMusic.pak.zip` as an artifact. `scripts/build-pak.sh` does the
+same locally with Docker, Go and jq; it expects this repo at
+`<ws>/opencode/git/paks` and is run as `WS=<ws> scripts/build-pak.sh <version>`.
+It builds the UI, `ffmpeg` (`scripts/build-ffmpeg.sh`) and `plexd` (`cd plexd &&
+go test ./...` runs its tests, which need a host ffmpeg).
+
+To build just the UI by hand, use the `ghcr.io/loveretro/tg5040-toolchain`
+Docker image (run via Podman):
 
 ```bash
 # Build libmsettings.so (once)

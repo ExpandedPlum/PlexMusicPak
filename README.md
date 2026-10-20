@@ -32,6 +32,7 @@ PlexMusic.pak is a music player for the TrimUI Brick that streams music from a P
 - "Favorite Tracks" on the home menu shows all favorites; A queues the whole list, Y removes a track
 - Press Y on "Favorite Tracks" in online mode to sync: missing tracks are downloaded, removed favorites are deleted from local storage
 - Offline edits (add/remove favorites) are automatically picked up by the next online sync — no extra step needed
+- Favorites are mirrored to Plex as five-star ratings ("loved" in Plexamp): changes are sent right away when online and queued when offline; the Y sync sends anything queued and adds tracks you loved in Plexamp or Plex Web
 
 **Auth & setup**
 - PIN-based Plex authentication (plex.tv/link, no password entry needed)

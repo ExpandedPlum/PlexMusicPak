@@ -11,6 +11,9 @@
 #include "include/parson/parson.h"
 #include "plex_log.h"
 #include "file_util.h"
+#include "plex_api.h"
+#include "plex_config.h"
+#include <pthread.h>
 
 /* ------------------------------------------------------------------
  * Constants
@@ -25,6 +28,44 @@
 
 static PlexTrack g_favs[PLEX_MAX_FAVORITES];
 static int       g_fav_count = 0;
+
+/* Favorites are mirrored to Plex as five-star ratings ("loved" in Plexamp).
+ * A change that couldn't reach the server (offline, or the request failed)
+ * waits here, saved with the favorites, until the next sync. */
+#define PLEX_LOVED_RATING 10
+#define MAX_PENDING       PLEX_MAX_FAVORITES
+
+typedef struct { int rating_key; bool loved; } PendingRating;
+
+static pthread_mutex_t g_pending_lock = PTHREAD_MUTEX_INITIALIZER;
+static PendingRating   g_pending[MAX_PENDING];
+static int             g_pending_count = 0;
+
+static void favorites_save(void);
+
+/* Record (or replace) the latest wanted state for a track. Caller holds
+ * g_pending_lock. */
+static void pending_set_locked(int rating_key, bool loved)
+{
+    for (int i = 0; i < g_pending_count; i++) {
+        if (g_pending[i].rating_key == rating_key) {
+            g_pending[i].loved = loved;
+            return;
+        }
+    }
+    if (g_pending_count < MAX_PENDING)
+        g_pending[g_pending_count++] = (PendingRating){ rating_key, loved };
+}
+
+static void pending_drop_locked(int rating_key, bool loved)
+{
+    for (int i = 0; i < g_pending_count; i++) {
+        if (g_pending[i].rating_key == rating_key && g_pending[i].loved == loved) {
+            g_pending[i] = g_pending[--g_pending_count];
+            return;
+        }
+    }
+}
 
 /* ------------------------------------------------------------------
  * Internal helpers
@@ -89,9 +130,24 @@ static void favorites_save(void)
         json_object_set_string(trk_obj, "album",        t->album);
         json_object_set_string(trk_obj, "media_key",    t->media_key);
         json_object_set_string(trk_obj, "thumb",        t->thumb);
+        json_object_set_string(trk_obj, "audio_codec",  t->audio_codec);
+        json_object_set_number(trk_obj, "bitrate_kbps", (double)t->audio_bitrate_kbps);
 
         json_array_append_value(tracks_a, trk_v);
     }
+
+    JSON_Value *pend_v = json_value_init_array();
+    JSON_Array *pend_a = json_value_get_array(pend_v);
+    pthread_mutex_lock(&g_pending_lock);
+    for (int i = 0; i < g_pending_count; i++) {
+        JSON_Value  *pv = json_value_init_object();
+        JSON_Object *po = json_value_get_object(pv);
+        json_object_set_number(po, "track_id", (double)g_pending[i].rating_key);
+        json_object_set_boolean(po, "loved", g_pending[i].loved);
+        json_array_append_value(pend_a, pv);
+    }
+    pthread_mutex_unlock(&g_pending_lock);
+    json_object_set_value(root_obj, "pending_ratings", pend_v);
 
     json_object_set_value(root_obj, "tracks", tracks_v);
 
@@ -152,6 +208,9 @@ static void favorites_load(void)
         const char *album     = json_object_get_string(trk_obj, "album");
         const char *media_key = json_object_get_string(trk_obj, "media_key");
         const char *thumb     = json_object_get_string(trk_obj, "thumb");
+        const char *codec     = json_object_get_string(trk_obj, "audio_codec");
+        t->audio_bitrate_kbps = (int)json_object_get_number(trk_obj, "bitrate_kbps");
+        if (codec)     strncpy(t->audio_codec, codec, sizeof(t->audio_codec) - 1);
 
         if (title)     strncpy(t->title,     title,     sizeof(t->title) - 1);
         if (artist)    strncpy(t->artist,    artist,    sizeof(t->artist) - 1);
@@ -163,8 +222,20 @@ static void favorites_load(void)
         g_fav_count++;
     }
 
+    JSON_Array *pend_a = json_object_get_array(root_obj, "pending_ratings");
+    size_t np = pend_a ? json_array_get_count(pend_a) : 0;
+    pthread_mutex_lock(&g_pending_lock);
+    g_pending_count = 0;
+    for (size_t i = 0; i < np; i++) {
+        JSON_Object *po = json_array_get_object(pend_a, i);
+        if (po)
+            pending_set_locked((int)json_object_get_number(po, "track_id"),
+                               json_object_get_boolean(po, "loved") == 1);
+    }
+    pthread_mutex_unlock(&g_pending_lock);
+
     json_value_free(root);
-    PLEX_LOG("[Favorites] Loaded %d favorites\n", g_fav_count);
+    PLEX_LOG("[Favorites] Loaded %d favorites (%d ratings to send)\n", g_fav_count, g_pending_count);
 }
 
 /* ------------------------------------------------------------------
@@ -182,6 +253,97 @@ void plex_favorites_quit(void)
     /* No-op: static array, nothing to free */
 }
 
+/* ------------------------------------------------------------------
+ * Mirroring to Plex ratings
+ * ------------------------------------------------------------------ */
+
+typedef struct {
+    char server_url[PLEX_MAX_URL];
+    char token[PLEX_MAX_STR];
+    int  rating_key;
+    bool loved;
+} RateJob;
+
+static void *rate_worker(void *arg)
+{
+    RateJob *job = arg;
+    PlexConfig cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    snprintf(cfg.server_url, sizeof(cfg.server_url), "%s", job->server_url);
+    snprintf(cfg.token, sizeof(cfg.token), "%s", job->token);
+    if (plex_api_rate(&cfg, job->rating_key, job->loved ? PLEX_LOVED_RATING : -1) == 0) {
+        pthread_mutex_lock(&g_pending_lock);
+        pending_drop_locked(job->rating_key, job->loved);
+        pthread_mutex_unlock(&g_pending_lock);
+    } else {
+        PLEX_LOG_ERROR("[Favorites] rating %d not sent; will retry on sync\n", job->rating_key);
+    }
+    free(job);
+    return NULL;
+}
+
+/* Queue the change, then send it in the background when online; it leaves
+ * the queue once the server takes it. */
+static void push_rating(int rating_key, bool loved)
+{
+    pthread_mutex_lock(&g_pending_lock);
+    pending_set_locked(rating_key, loved);
+    pthread_mutex_unlock(&g_pending_lock);
+
+    const PlexConfig *cfg = plex_config_get_mutable();
+    if (cfg->offline_mode || !plex_config_is_valid(cfg)) return;
+
+    RateJob *job = calloc(1, sizeof(*job));
+    if (!job) return;
+    snprintf(job->server_url, sizeof(job->server_url), "%s", cfg->server_url);
+    snprintf(job->token, sizeof(job->token), "%s", cfg->token);
+    job->rating_key = rating_key;
+    job->loved      = loved;
+    pthread_t th;
+    if (pthread_create(&th, NULL, rate_worker, job) == 0) pthread_detach(th);
+    else free(job);
+}
+
+int plex_favorites_sync_with_plex(const PlexConfig *cfg)
+{
+    if (!cfg || cfg->offline_mode || !plex_config_is_valid(cfg)) return -1;
+
+    /* 1. Send queued changes, so a favorite removed offline isn't pulled
+     *    straight back in below. */
+    PendingRating todo[MAX_PENDING];
+    pthread_mutex_lock(&g_pending_lock);
+    int n = g_pending_count;
+    memcpy(todo, g_pending, n * sizeof(PendingRating));
+    pthread_mutex_unlock(&g_pending_lock);
+    for (int i = 0; i < n; i++) {
+        if (plex_api_rate(cfg, todo[i].rating_key,
+                          todo[i].loved ? PLEX_LOVED_RATING : -1) != 0)
+            return -1;   /* server unreachable: keep everything for next time */
+        pthread_mutex_lock(&g_pending_lock);
+        pending_drop_locked(todo[i].rating_key, todo[i].loved);
+        pthread_mutex_unlock(&g_pending_lock);
+    }
+
+    /* 2. Add tracks loved elsewhere (Plexamp, Plex Web). */
+    int added = 0;
+    if (cfg->library_id > 0) {
+        static PlexTrack loved[PLEX_MAX_FAVORITES];
+        int count = 0;
+        if (plex_api_get_loved_tracks(cfg, cfg->library_id, loved, PLEX_MAX_FAVORITES, &count) == 0) {
+            for (int i = 0; i < count && g_fav_count < PLEX_MAX_FAVORITES; i++) {
+                if (plex_favorites_contains(loved[i].rating_key)) continue;
+                g_favs[g_fav_count] = loved[i];
+                g_favs[g_fav_count].local_path[0] = '\0';
+                g_fav_count++;
+                added++;
+            }
+        }
+    }
+    favorites_save();
+    PLEX_LOG("[Favorites] synced with Plex: %d sent, %d added\n", n, added);
+    return added;
+}
+
 bool plex_favorites_toggle(const PlexTrack *t)
 {
     if (!t) return false;
@@ -193,6 +355,7 @@ bool plex_favorites_toggle(const PlexTrack *t)
                 memmove(&g_favs[i], &g_favs[i + 1],
                         (g_fav_count - i - 1) * sizeof(PlexTrack));
             g_fav_count--;
+            push_rating(t->rating_key, false);
             favorites_save();
             return false;
         }
@@ -209,6 +372,7 @@ bool plex_favorites_toggle(const PlexTrack *t)
     /* Clear runtime-only field */
     g_favs[g_fav_count].local_path[0] = '\0';
     g_fav_count++;
+    push_rating(t->rating_key, true);
     favorites_save();
     return true;
 }

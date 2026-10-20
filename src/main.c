@@ -78,6 +78,18 @@ int main(int argc, char *argv[]) {
 
     plex_downloads_init();
 
+    /* Cover art cache: prune to 120 MB once past 150 MB, keeping art for
+     * downloaded albums so offline browsing still has covers. */
+    {
+        PlexAlbum *albums = malloc(PLEX_MAX_OFFLINE_ITEMS * sizeof(PlexAlbum));
+        const char **keep = malloc(PLEX_MAX_OFFLINE_ITEMS * sizeof(char *));
+        int n = (albums && keep) ? plex_downloads_get_all_albums(albums, PLEX_MAX_OFFLINE_ITEMS) : 0;
+        for (int i = 0; i < n; i++) keep[i] = albums[i].thumb;
+        plex_art_prune_cache_async(150L << 20, 120L << 20, keep, n);
+        free(keep);
+        free(albums);
+    }
+
     plex_favorites_init();
 
     signal(SIGINT, sig_handler);

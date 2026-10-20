@@ -64,6 +64,14 @@ void plex_api_timeline(const PlexConfig *cfg, int rating_key,
  */
 void plex_api_scrobble(const PlexConfig *cfg, int rating_key);
 
+/* Set a track's star rating, 0-10 (10 = five stars / loved); -1 clears it.
+ * Returns 0 on success. */
+int plex_api_rate(const PlexConfig *cfg, int rating_key, int rating);
+
+/* Tracks in a library rated five stars, up to max. Returns 0 on success. */
+int plex_api_get_loved_tracks(const PlexConfig *cfg, int section_id,
+                              PlexTrack tracks[], int max, int *count);
+
 /*
  * Get paginated list of all albums in a library section, sorted by year descending.
  * offset: 0-based start. max_count: maximum items to write into albums[].

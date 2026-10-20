@@ -774,7 +774,7 @@ static PlexAlbum   *s_all_albums     = NULL;
 static int          s_all_albums_cap = 0;
 
 /* Favorites list — file-scope to avoid stack overflow (~1.3 MB) */
-static PlexTrack s_fav_tracks[PLEX_MAX_TRACKS];
+static PlexTrack s_fav_tracks[PLEX_MAX_FAVORITES];
 static int       s_fav_count = 0;
 
 static bool pending_r2_jump     = false; /* deferred artist letter jump */
@@ -1159,10 +1159,10 @@ AppModule module_browse_run(SDL_Surface *screen)
                     }
                 } else if (fav_idx >= 0 && lib_selected == fav_idx) {
                     if (!cfg->offline_mode) {
-                        s_fav_count = plex_favorites_get(s_fav_tracks, PLEX_MAX_TRACKS);
+                        s_fav_count = plex_favorites_get(s_fav_tracks, PLEX_MAX_FAVORITES);
                     } else {
                         s_fav_count = plex_downloads_get_favorite_tracks(
-                                          s_fav_tracks, PLEX_MAX_TRACKS);
+                                          s_fav_tracks, PLEX_MAX_FAVORITES);
                     }
                     fav_selected  = 0;
                     fav_scroll    = 0;
@@ -1175,7 +1175,9 @@ AppModule module_browse_run(SDL_Surface *screen)
                 }
             } else if (PAD_justPressed(BTN_Y) && !cfg->offline_mode
                        && fav_idx >= 0 && lib_selected == fav_idx) {
-                s_fav_count = plex_favorites_get(s_fav_tracks, PLEX_MAX_TRACKS);
+                render_status_message(screen, "Syncing favorites with Plex...");
+                plex_favorites_sync_with_plex(cfg);
+                s_fav_count = plex_favorites_get(s_fav_tracks, PLEX_MAX_FAVORITES);
                 plex_downloads_sync_favorites(cfg, s_fav_tracks, s_fav_count);
                 dirty = 1;
             } else if (PAD_justPressed(BTN_B)) {
@@ -2777,10 +2779,10 @@ AppModule module_browse_run(SDL_Surface *screen)
             } else if (PAD_justPressed(BTN_Y) && s_fav_count > 0) {
                 plex_favorites_toggle(&s_fav_tracks[fav_selected]);
                 if (!cfg->offline_mode) {
-                    s_fav_count = plex_favorites_get(s_fav_tracks, PLEX_MAX_TRACKS);
+                    s_fav_count = plex_favorites_get(s_fav_tracks, PLEX_MAX_FAVORITES);
                 } else {
                     s_fav_count = plex_downloads_get_favorite_tracks(
-                                      s_fav_tracks, PLEX_MAX_TRACKS);
+                                      s_fav_tracks, PLEX_MAX_FAVORITES);
                 }
                 if (fav_selected >= s_fav_count)
                     fav_selected = s_fav_count > 0 ? s_fav_count - 1 : 0;

@@ -39,4 +39,13 @@ bool plex_art_is_fetching(void);
 /* Cancel any in-flight fetch and free the current surface. */
 void plex_art_clear(void);
 
+/*
+ * Keep the disk cache in check: once it holds more than max_bytes, delete
+ * the least recently shown images until it is under target_bytes. Art for
+ * keep_thumbs (downloaded albums, so offline browsing keeps its covers) is
+ * never deleted. Runs in a background thread; keep_thumbs is copied.
+ */
+void plex_art_prune_cache_async(long max_bytes, long target_bytes,
+                                const char *const *keep_thumbs, int keep_count);
+
 #endif /* PLEX_ART_H */

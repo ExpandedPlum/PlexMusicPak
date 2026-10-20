@@ -1,0 +1,185 @@
+---
+name: "release"
+
+# Run by hand from the Actions tab: picks the next version, tests, builds the
+# pak, then commits the version to pak.json, tags it and publishes a release.
+# yamllint disable-line rule:truthy
+on:
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: "Bump type"
+        default: "patch"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  attestations: write
+  id-token: write
+  contents: write
+
+jobs:
+  version:
+    name: version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.next-tag.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Get Latest Tag
+        id: latest-tag
+        # Before the first release there are no tags; start from pak.json.
+        run: |
+          latest="$(git describe --tags "$(git rev-list --tags --max-count=1)" 2>/dev/null || true)"
+          if [ -z "$latest" ]; then
+            latest="$(jq -r .version pak.json)"
+          fi
+          echo GIT_LATEST_TAG="$latest" >>"$GITHUB_OUTPUT"
+
+      - name: Compute Next Tag
+        id: next-tag
+        uses: docker://ghcr.io/dokku/semver-generator:latest
+        with:
+          bump: ${{ github.event.inputs.bump_type }}
+          input: ${{ steps.latest-tag.outputs.GIT_LATEST_TAG }}
+
+  test:
+    name: test
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: plexd/go.mod
+          cache-dependency-path: plexd/go.sum
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Lint
+        working-directory: plexd
+        run: test -z "$(gofmt -l .)" && go vet ./...
+
+      - name: Test
+        working-directory: plexd
+        run: go test -race ./...
+
+      - name: Shell syntax
+        run: for f in launch.sh scripts/*.sh; do sh -n "$f" || exit 1; done
+
+  build:
+    name: build
+    # The NextUI toolchain image is x86_64, so build on an x86 runner.
+    runs-on: ubuntu-24.04
+    needs:
+      - version
+      - test
+
+    steps:
+      # build-pak.sh expects the repo here (the UI Makefile finds NextUI at
+      # ../../../NextUI).
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          path: opencode/git/paks
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: opencode/git/paks/plexd/go.mod
+          cache-dependency-path: opencode/git/paks/plexd/go.sum
+
+      - name: Cache ffmpeg
+        uses: actions/cache@v6
+        with:
+          path: build/ffmpeg-bin
+          key: ffmpeg-tg5040-${{ hashFiles('opencode/git/paks/scripts/build-ffmpeg.sh') }}
+
+      - name: Pull toolchain image
+        run: docker pull ghcr.io/loveretro/tg5040-toolchain:latest
+
+      - name: Create release
+        env:
+          FFMPEG_CACHE: ${{ github.workspace }}/build/ffmpeg-bin
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          sh opencode/git/paks/scripts/build-pak.sh "$RELEASE_VERSION"
+          mkdir -p dist
+          mv PlexMusic.pak.zip PlexMusic-install.zip dist/
+
+      - name: Attest Build Provenance
+        uses: actions/attest-build-provenance@v3.2.0
+        with:
+          subject-path: |
+            dist/PlexMusic.pak.zip
+            dist/PlexMusic-install.zip
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: dist
+          path: dist/
+
+  release:
+    name: release
+    runs-on: ubuntu-24.04
+    needs:
+      - version
+      - build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: dist
+          path: dist
+
+      - name: Validate Artifacts exist
+        run: |
+          for f in dist/PlexMusic.pak.zip dist/PlexMusic-install.zip; do
+            if [ ! -f "$f" ]; then
+              echo "$f does not exist"
+              exit 1
+            fi
+          done
+
+      - name: Create and Push Tag
+        run: |
+          jq --arg v "$RELEASE_VERSION" '.version = $v' pak.json > pak.json.tmp
+          mv pak.json.tmp pak.json
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add pak.json
+          git commit -m "Release $RELEASE_VERSION"
+          git tag "$RELEASE_VERSION"
+          git push origin "$RELEASE_VERSION"
+          git push origin "HEAD:${{ github.ref_name }}"
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+
+      - name: Release
+        uses: softprops/action-gh-release@v3.0.3
+        with:
+          name: Plex Music+ ${{ needs.version.outputs.version }}
+          files: dist/*
+          generate_release_notes: true
+          make_latest: "true"
+          tag_name: ${{ needs.version.outputs.version }}

@@ -238,9 +238,14 @@ or `SELECT+R1`, with commas between alternatives.
 ## Building
 
 CI (`.github/workflows/ci.yml`) runs the `plexd` tests and builds the whole
-pak on every push, then uploads both zips as artifacts. To publish a release,
-run the *Build & Release* workflow (`.github/workflows/build-release.yml`) by
-hand with a version number; it attaches both zips to a GitHub release.
+pak on every push, then uploads both zips as artifacts.
+
+To publish a release, run the **release** workflow
+(`.github/workflows/release.yml`) from the Actions tab and choose patch, minor
+or major. It works out the next version from the latest tag (or `pak.json`
+before the first release), runs the tests, builds the pak, commits the version
+to `pak.json`, tags it, and publishes a GitHub release with both zips and
+generated release notes.
 
 To build locally you need Docker, Go and jq:
 

@@ -88,6 +88,16 @@ typedef struct {
     int  audio_bitrate_kbps;         /* 0 if unknown */
 } PlexTrack;
 
+#define PLEX_MAX_PLAYLISTS 200
+
+typedef struct {
+    int  rating_key;
+    int  track_count;                 /* leafCount */
+    bool smart;
+    char title[PLEX_MAX_STR];
+    char thumb[PLEX_MAX_URL];         /* "composite" artwork */
+} PlexPlaylist;
+
 /* Generic paginated result */
 typedef struct {
     int total;

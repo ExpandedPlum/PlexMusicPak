@@ -90,6 +90,7 @@ SOURCE = main.c \
          ui_fonts.c \
          ui_icons.c \
          ui_utils.c \
+         ui_keyboard.c \
          module_common.c \
          include/parson/parson.c \
          $(NEXTUI_COMMON_SRC) \

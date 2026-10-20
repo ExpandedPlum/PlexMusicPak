@@ -21,6 +21,7 @@
 #include "plex_models.h"
 #include "plex_queue.h"
 #include "plexd_client.h"
+#include "ui_keyboard.h"
 #include "plex_downloads.h"
 #include "plex_favorites.h"
 #include "ui_fonts.h"
@@ -42,7 +43,12 @@ typedef enum {
     BROWSE_ALL_ALBUMS_PAGE,  /* append-only page load; NOT a visible state */
     BROWSE_RECENT_ALBUMS,    /* recently added albums (online only) */
     BROWSE_FAVORITES,        /* favorite tracks list (online only) */
+    BROWSE_PLAYLISTS,        /* audio playlists (online only) */
+    BROWSE_TRACK_LIST,       /* a playlist's tracks */
+    BROWSE_SEARCH,           /* search results: artists, albums, tracks */
 } BrowseState;
+
+static int playing_rating_key(void);
 
 typedef enum {
     LOAD_IDLE    = 0,  /* not started or reset */
@@ -101,7 +107,23 @@ static struct {
     PlexPage         all_albums_page;   /* written by worker, read by main on DONE */
     int              all_albums_offset; /* offset for BROWSE_ALL_ALBUMS_PAGE worker */
     int              list_cap;          /* array capacity passed to worker for artists/all_albums pages */
+    /* playlists, playlist tracks, search */
+    PlexPlaylist      *playlists;
+    int               *playlist_count;
+    int                playlist_id;
+    char               query[128];
+    PlexSearchResults *search;
 } s_load = { .lock = PTHREAD_MUTEX_INITIALIZER };
+
+/* Inputs for the playlist and search loads, set before browse_load_kick()
+ * (which copies them in under the lock). */
+static struct {
+    PlexPlaylist      *playlists;
+    int               *playlist_count;
+    int                playlist_id;
+    char               query[128];
+    PlexSearchResults *search;
+} s_kick_extra;
 
 static LoadState browse_load_poll(void);
 
@@ -236,6 +258,17 @@ static int browse_load_fetch(const PlexConfig *cfg_in, BrowseState type, int my_
                                              s_load.list_cap,
                                              s_load.albums, s_load.album_count);
             break;
+        case BROWSE_PLAYLISTS:
+            rc = plex_api_get_playlists(&cfg, s_load.playlists, PLEX_MAX_PLAYLISTS,
+                                        s_load.playlist_count);
+            break;
+        case BROWSE_TRACK_LIST:
+            rc = plex_api_get_playlist_tracks(&cfg, s_load.playlist_id, s_load.tracks,
+                                              PLEX_MAX_TRACKS, s_load.track_count);
+            break;
+        case BROWSE_SEARCH:
+            rc = plex_api_search(&cfg, s_load.library_id, s_load.query, s_load.search);
+            break;
         default:
             rc = -1;
     }
@@ -280,6 +313,11 @@ static void browse_load_kick(BrowseState type, const PlexConfig *cfg,
     s_load.artists     = artists;
     s_load.albums      = albums;     s_load.album_count = album_count;
     s_load.tracks      = tracks;     s_load.track_count = track_count;
+    s_load.playlists      = s_kick_extra.playlists;
+    s_load.playlist_count = s_kick_extra.playlist_count;
+    s_load.playlist_id    = s_kick_extra.playlist_id;
+    s_load.search         = s_kick_extra.search;
+    memcpy(s_load.query, s_kick_extra.query, sizeof(s_load.query));
     s_load.status      = LOAD_RUNNING;
     pthread_mutex_unlock(&s_load.lock);
 
@@ -636,6 +674,8 @@ typedef struct {
     int         recent_idx;
     int         nowplay_idx;
     int         fav_idx;
+    int         playlists_idx;
+    int         search_idx;
 } HomeLabelCtx;
 
 static void home_get_label(int idx, char *buf, int size, void *ud)
@@ -663,7 +703,42 @@ static void home_get_label(int idx, char *buf, int size, void *ud)
         return;
     }
     if (ctx->recent_idx >= 0 && idx == ctx->recent_idx) { snprintf(buf, size, "Recently Added"); return; }
+    if (ctx->playlists_idx >= 0 && idx == ctx->playlists_idx) { snprintf(buf, size, "Playlists"); return; }
+    if (ctx->search_idx >= 0 && idx == ctx->search_idx) { snprintf(buf, size, "Search"); return; }
     snprintf(buf, size, "Settings");
+}
+
+/* Playlist label: title and track count */
+static void playlist_get_label(int idx, char *buf, int size, void *ud)
+{
+    const PlexPlaylist *p = &((const PlexPlaylist *)ud)[idx];
+    snprintf(buf, size, "%s  (%d)", p->title, p->track_count);
+}
+
+/* Search results are one list: artists, then albums, then tracks */
+static int search_item_count(const PlexSearchResults *r)
+{
+    return r->artist_count + r->album_count + r->track_count;
+}
+
+static void search_get_label(int idx, char *buf, int size, void *ud)
+{
+    const PlexSearchResults *r = ud;
+    if (idx < r->artist_count) {
+        snprintf(buf, size, "Artist: %s", r->artists[idx].title);
+        return;
+    }
+    idx -= r->artist_count;
+    if (idx < r->album_count) {
+        snprintf(buf, size, "Album: %s - %s", r->albums[idx].title, r->albums[idx].artist);
+        return;
+    }
+    idx -= r->album_count;
+    char dur[16];
+    format_duration(r->tracks[idx].duration_ms, dur, sizeof(dur));
+    snprintf(buf, size, "%s%s - %s  %s",
+             playing_rating_key() == r->tracks[idx].rating_key ? "\xe2\x96\xb6 " : "",
+             r->tracks[idx].title, r->tracks[idx].artist, dur);
 }
 
 /* Library picker label callback: plain music library names */
@@ -736,8 +811,16 @@ typedef struct {
     PlexTrack *tracks;
     int        count;
     bool       show_favorites;  /* prepend ♥ for favorited tracks */
+    bool       show_artist;     /* "Title - Artist" (playlists, search) */
     int        playing_rating_key;  /* rating_key of current queue track, or -1 */
 } TrackLabelCtx;
+
+/* Rating key plexd is playing, or -1, for the ▶ marker in track lists */
+static int playing_rating_key(void)
+{
+    const PlexdStatus *st = plexd_cached_status();
+    return (plexd_has_queue() && st->has_track) ? st->track.rating_key : -1;
+}
 
 static void track_get_label(int i, char *buf, int size, void *ud)
 {
@@ -751,7 +834,10 @@ static void track_get_label(int i, char *buf, int size, void *ud)
                plex_favorites_contains(ctx->tracks[i].rating_key);
     const char *prefix = playing ? "\xe2\x96\xb6 " : (fav ? "\xe2\x99\xa5 " : "");
 
-    if (ctx->tracks[i].track_number > 0)
+    if (ctx->show_artist && ctx->tracks[i].artist[0])
+        snprintf(buf, size, "%s%s - %s  %s",
+                 prefix, ctx->tracks[i].title, ctx->tracks[i].artist, dur);
+    else if (ctx->tracks[i].track_number > 0)
         snprintf(buf, size, "%s%d. %s  %s",
                  prefix, ctx->tracks[i].track_number,
                  ctx->tracks[i].title, dur);
@@ -868,6 +954,32 @@ AppModule module_browse_run(SDL_Surface *screen)
 
     /* Tracks back-navigation target */
     static BrowseState   tracks_back_state   = BROWSE_ALBUMS;
+    /* Albums back-navigation target: the artist list, or search results */
+    static BrowseState   albums_back_state   = BROWSE_ARTISTS;
+
+    /* Playlists (online only) */
+    static PlexPlaylist  playlists[PLEX_MAX_PLAYLISTS];
+    static int           playlist_count    = 0;
+    static int           playlist_selected = 0;
+    static int           playlist_scroll   = 0;
+    static LoadState     playlists_ls      = LOAD_IDLE;
+
+    /* A playlist's tracks */
+    static PlexTrack     list_tracks[PLEX_MAX_TRACKS];
+    static int           list_count        = 0;
+    static int           list_selected     = 0;
+    static int           list_scroll       = 0;
+    static LoadState     list_ls           = LOAD_IDLE;
+    static int           list_playlist_id  = 0;
+    static char          list_title[PLEX_MAX_STR] = "";
+
+    /* Search */
+    static PlexSearchResults search_results;
+    static char          search_query[128] = "";
+    static int           search_selected   = 0;
+    static int           search_scroll     = 0;
+    static LoadState     search_ls         = LOAD_IDLE;
+    static PlexAlbum     search_album;      /* album opened from the results */
 
     /* Selected keys carried between levels */
     static int           selected_library_id       = 0;
@@ -1011,17 +1123,18 @@ AppModule module_browse_run(SDL_Surface *screen)
             bool bg_active = (Background_getActive() == BG_MUSIC);
             bool online    = !cfg->offline_mode;
 
-            int artists_idx, albums_idx, fav_idx, recent_idx, nowplay_idx, settings_idx, home_item_count;
-
-            if (bg_active) {
-                nowplay_idx = 0; artists_idx = 1; albums_idx = 2;
-                if (online) { fav_idx = 3; recent_idx = 4; settings_idx = 5; home_item_count = 6; }
-                else        { fav_idx = 3; recent_idx = -1; settings_idx = 4; home_item_count = 5; }
-            } else {
-                nowplay_idx = -1; artists_idx = 0; albums_idx = 1;
-                if (online) { fav_idx = 2; recent_idx = 3; settings_idx = 4; home_item_count = 5; }
-                else        { fav_idx = 2; recent_idx = -1; settings_idx = 3; home_item_count = 4; }
-            }
+            /* [Now Playing] / Artists / Albums / Favorite Tracks / [Playlists] /
+             * [Recently Added] / [Search] / Settings — bracketed ones depend on
+             * playback or being online */
+            int home_item_count = 0;
+            int nowplay_idx   = bg_active ? home_item_count++ : -1;
+            int artists_idx   = home_item_count++;
+            int albums_idx    = home_item_count++;
+            int fav_idx       = home_item_count++;
+            int playlists_idx = online ? home_item_count++ : -1;
+            int recent_idx    = online ? home_item_count++ : -1;
+            int search_idx    = online ? home_item_count++ : -1;
+            int settings_idx  = home_item_count++;
 
             /* Clamp selection in case bg state changed */
             if (lib_selected >= home_item_count)
@@ -1092,6 +1205,28 @@ AppModule module_browse_run(SDL_Surface *screen)
                     return MODULE_SETTINGS;
                 } else if (nowplay_idx >= 0 && lib_selected == nowplay_idx) {
                     return MODULE_PLAYER;
+                } else if (playlists_idx >= 0 && lib_selected == playlists_idx) {
+                    playlists_ls      = LOAD_IDLE;
+                    playlist_selected = 0;
+                    playlist_scroll   = 0;
+                    last_art_thumb[0] = '\0';
+                    plex_art_clear();
+                    state = BROWSE_PLAYLISTS;
+                    dirty = 1;
+                    GFX_sync();
+                    continue;
+                } else if (search_idx >= 0 && lib_selected == search_idx) {
+                    if (UI_keyboard(screen, "Search", search_query, sizeof(search_query))) {
+                        search_ls       = LOAD_IDLE;
+                        search_selected = 0;
+                        search_scroll   = 0;
+                        last_art_thumb[0] = '\0';
+                        plex_art_clear();
+                        state = BROWSE_SEARCH;
+                    }
+                    dirty = 1;
+                    GFX_sync();
+                    continue;
                 } else if (recent_idx >= 0 && lib_selected == recent_idx) {
                     /* Recently Added (online only) */
                     selected_library_id   = cfg->library_id;
@@ -1247,6 +1382,8 @@ AppModule module_browse_run(SDL_Surface *screen)
                 hctx.recent_idx        = recent_idx;
                 hctx.nowplay_idx       = nowplay_idx;
                 hctx.fav_idx           = fav_idx;
+                hctx.playlists_idx     = playlists_idx;
+                hctx.search_idx        = search_idx;
 
                 const char *home_header = cfg->offline_mode ? "Music (Offline)" : "Music (Online)";
                 render_browse_screen(screen, home_header,
@@ -1670,6 +1807,7 @@ AppModule module_browse_run(SDL_Surface *screen)
                         artists_page_loading = false;
                     }
                     selected_artist_rating_key = s_artists[artist_selected].rating_key;
+                    albums_back_state = BROWSE_ARTISTS;
                     albums_ls      = LOAD_IDLE;
                     album_selected = 0;
                     album_scroll   = 0;
@@ -1783,7 +1921,7 @@ AppModule module_browse_run(SDL_Surface *screen)
                         albums_ls = LOAD_IDLE;
                         last_art_thumb[0] = '\0';
                         plex_art_clear();
-                        state = BROWSE_ARTISTS;
+                        state = albums_back_state;
                         dirty = 1;
                     }
                     GFX_sync();
@@ -1817,7 +1955,7 @@ AppModule module_browse_run(SDL_Surface *screen)
                 }
                 net_auto_retries = 0;
                 net_error_from = BROWSE_ALBUMS;
-                net_error_back = BROWSE_ARTISTS;
+                net_error_back = albums_back_state;
                 state = BROWSE_NET_ERROR;
                 dirty = 1;
                 GFX_sync();
@@ -1921,16 +2059,21 @@ AppModule module_browse_run(SDL_Surface *screen)
             } else if (PAD_justPressed(BTN_B)) {
                 last_art_thumb[0] = '\0';
                 plex_art_clear();
-                state = BROWSE_ARTISTS;
+                state = albums_back_state;
                 dirty = 1;
                 GFX_sync();
                 continue;
             } else if (PAD_justPressed(BTN_Y) && !cfg->offline_mode && album_count > 0) {
+                /* From search the artist isn't in s_artists; the album knows it */
+                bool from_artists = albums_back_state == BROWSE_ARTISTS &&
+                                    artist_selected < artists_loaded;
                 plex_downloads_queue_album(mutable_cfg,
                     albums[album_selected].rating_key,
                     albums[album_selected].title,
-                    s_artists[artist_selected].rating_key,
-                    s_artists[artist_selected].title,
+                    from_artists ? s_artists[artist_selected].rating_key
+                                 : albums[album_selected].artist_id,
+                    from_artists ? s_artists[artist_selected].title
+                                 : albums[album_selected].artist,
                     albums[album_selected].thumb,
                     albums[album_selected].year);
                 dirty = 1;
@@ -2569,6 +2712,8 @@ AppModule module_browse_run(SDL_Surface *screen)
                                          "%s", recent_albums[recent_album_selected].thumb);
                                 plex_art_fetch(cfg, recent_albums[recent_album_selected].thumb);
                             }
+                        } else if (tracks_back_state == BROWSE_SEARCH) {
+                            /* results list has no art */
                         } else {
                             if (album_selected < album_count && albums[album_selected].thumb[0]) {
                                 snprintf(last_art_thumb, sizeof(last_art_thumb),
@@ -2668,6 +2813,8 @@ AppModule module_browse_run(SDL_Surface *screen)
                                  "%s", recent_albums[recent_album_selected].thumb);
                         plex_art_fetch(cfg, recent_albums[recent_album_selected].thumb);
                     }
+                } else if (tracks_back_state == BROWSE_SEARCH) {
+                    /* results list has no art */
                 } else {
                     if (album_selected < album_count && albums[album_selected].thumb[0]) {
                         snprintf(last_art_thumb, sizeof(last_art_thumb),
@@ -2693,10 +2840,8 @@ AppModule module_browse_run(SDL_Surface *screen)
                 tctx.tracks         = tracks;
                 tctx.count          = track_count;
                 tctx.show_favorites = true;
-                {
-                    const PlexTrack *pt = plex_queue_current_track();
-                    tctx.playing_rating_key = pt ? pt->rating_key : -1;
-                }
+                tctx.show_artist        = false;
+                tctx.playing_rating_key = playing_rating_key();
 
                 /* Album title + year as art metadata */
                 char art_line2[PLEX_MAX_STR + 8] = "";
@@ -2716,6 +2861,10 @@ AppModule module_browse_run(SDL_Surface *screen)
                             snprintf(art_line2, sizeof(art_line2), "%s",
                                      recent_albums[recent_album_selected].year);
                     }
+                } else if (tracks_back_state == BROWSE_SEARCH) {
+                    art_line1 = search_album.title;
+                    if (search_album.year[0])
+                        snprintf(art_line2, sizeof(art_line2), "%s", search_album.year);
                 } else if (track_count > 0 && album_count > 0) {
                     art_line1 = albums[album_selected].title;
                     if (albums[album_selected].year[0])
@@ -2796,10 +2945,8 @@ AppModule module_browse_run(SDL_Surface *screen)
                 tctx.tracks         = s_fav_tracks;
                 tctx.count          = s_fav_count;
                 tctx.show_favorites = false;  /* no hearts — every item is a favorite */
-                {
-                    const PlexTrack *pt = plex_queue_current_track();
-                    tctx.playing_rating_key = pt ? pt->rating_key : -1;
-                }
+                tctx.show_artist        = false;
+                tctx.playing_rating_key = playing_rating_key();
 
                 render_browse_screen(screen, "Favorite Tracks",
                                      fav_selected, &fav_scroll,
@@ -2808,6 +2955,350 @@ AppModule module_browse_run(SDL_Surface *screen)
                                      track_get_label, &tctx,
                                      "PLAY", "BACK", 0);
                 GFX_blitButtonGroup((char*[]){"Y", "REMOVE", NULL}, 0, screen, 0);
+                GFX_flip(screen);
+                dirty = 0;
+            } else {
+                GFX_sync();
+            }
+
+        /* ==============================================================
+         * BROWSE_PLAYLISTS
+         * ============================================================== */
+        } else if (state == BROWSE_PLAYLISTS) {
+
+            if (playlists_ls == LOAD_IDLE) {
+                s_kick_extra.playlists      = playlists;
+                s_kick_extra.playlist_count = &playlist_count;
+                browse_load_kick(BROWSE_PLAYLISTS, cfg, 0, 0, 0,
+                                 NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+                playlists_ls = LOAD_RUNNING;
+            }
+            if (playlists_ls == LOAD_RUNNING) {
+                LoadState ws = browse_load_poll();
+                if (ws == LOAD_DONE || ws == LOAD_ERROR) {
+                    playlists_ls = ws;
+                } else {
+                    render_loading(screen, true);
+                    if (PAD_justPressed(BTN_B)) {
+                        s_load.cancel = true;
+                        playlists_ls = LOAD_IDLE;
+                        state = BROWSE_LIBRARIES;
+                        dirty = 1;
+                    }
+                    GFX_sync();
+                    continue;
+                }
+            }
+            if (playlists_ls == LOAD_DONE) {
+                browse_load_join();
+                net_auto_retries = 0;
+                playlists_ls = LOAD_READY;
+                dirty = 1;
+            }
+            if (playlists_ls == LOAD_ERROR) {
+                browse_load_join();
+                playlists_ls = LOAD_IDLE;
+                if (net_auto_retries < 3) {
+                    net_auto_retries++;
+                } else {
+                    net_auto_retries = 0;
+                    net_error_from = BROWSE_PLAYLISTS;
+                    net_error_back = BROWSE_LIBRARIES;
+                    state = BROWSE_NET_ERROR;
+                }
+                dirty = 1;
+                GFX_sync();
+                continue;
+            }
+
+            if (!PAD_isPressed(BTN_UP))    s_hold_up_since   = 0;
+            if (!PAD_isPressed(BTN_DOWN))  s_hold_down_since = 0;
+            if (PAD_justPressed(BTN_UP))   s_hold_up_since   = SDL_GetTicks();
+            if (PAD_justPressed(BTN_DOWN)) s_hold_down_since = SDL_GetTicks();
+
+            if (PAD_justRepeated(BTN_UP) && playlist_count > 0) {
+                int step = scroll_step(s_hold_up_since);
+                playlist_selected = playlist_selected >= step ? playlist_selected - step : 0;
+                dirty = 1;
+            } else if (PAD_justRepeated(BTN_DOWN) && playlist_count > 0) {
+                int step = scroll_step(s_hold_down_since);
+                int cap = playlist_count - 1;
+                playlist_selected = playlist_selected + step <= cap ? playlist_selected + step : cap;
+                dirty = 1;
+            } else if (PAD_justPressed(BTN_A) && playlist_count > 0) {
+                list_playlist_id = playlists[playlist_selected].rating_key;
+                snprintf(list_title, sizeof(list_title), "%s", playlists[playlist_selected].title);
+                list_ls       = LOAD_IDLE;
+                list_selected = 0;
+                list_scroll   = 0;
+                state = BROWSE_TRACK_LIST;
+                dirty = 1;
+                GFX_sync();
+                continue;
+            } else if (PAD_justPressed(BTN_B)) {
+                state = BROWSE_LIBRARIES;
+                dirty = 1;
+                GFX_sync();
+                continue;
+            }
+
+            if (dirty) {
+                if (playlist_count == 0) {
+                    render_empty_state(screen, "No music playlists",
+                                       "Make one in Plexamp or Plex Web", NULL);
+                    GFX_flip(screen);
+                } else {
+                    render_browse_screen(screen, "Playlists",
+                                         playlist_selected, &playlist_scroll,
+                                         playlist_count,
+                                         NULL, NULL, NULL, NULL,
+                                         playlist_get_label, playlists,
+                                         "OPEN", "BACK", 0);
+                    GFX_flip(screen);
+                }
+                dirty = 0;
+            } else {
+                GFX_sync();
+            }
+
+        /* ==============================================================
+         * BROWSE_TRACK_LIST — a playlist's tracks
+         * ============================================================== */
+        } else if (state == BROWSE_TRACK_LIST) {
+
+            if (list_ls == LOAD_IDLE) {
+                s_kick_extra.playlist_id = list_playlist_id;
+                browse_load_kick(BROWSE_TRACK_LIST, cfg, 0, 0, 0,
+                                 NULL, NULL, NULL, NULL, NULL, list_tracks, &list_count);
+                list_ls = LOAD_RUNNING;
+            }
+            if (list_ls == LOAD_RUNNING) {
+                LoadState ws = browse_load_poll();
+                if (ws == LOAD_DONE || ws == LOAD_ERROR) {
+                    list_ls = ws;
+                } else {
+                    render_loading(screen, true);
+                    if (PAD_justPressed(BTN_B)) {
+                        s_load.cancel = true;
+                        list_ls = LOAD_IDLE;
+                        state = BROWSE_PLAYLISTS;
+                        dirty = 1;
+                    }
+                    GFX_sync();
+                    continue;
+                }
+            }
+            if (list_ls == LOAD_DONE) {
+                browse_load_join();
+                net_auto_retries = 0;
+                list_ls = LOAD_READY;
+                dirty = 1;
+            }
+            if (list_ls == LOAD_ERROR) {
+                browse_load_join();
+                list_ls = LOAD_IDLE;
+                if (net_auto_retries < 3) {
+                    net_auto_retries++;
+                } else {
+                    net_auto_retries = 0;
+                    net_error_from = BROWSE_TRACK_LIST;
+                    net_error_back = BROWSE_PLAYLISTS;
+                    state = BROWSE_NET_ERROR;
+                }
+                dirty = 1;
+                GFX_sync();
+                continue;
+            }
+
+            if (!PAD_isPressed(BTN_UP))    s_hold_up_since   = 0;
+            if (!PAD_isPressed(BTN_DOWN))  s_hold_down_since = 0;
+            if (PAD_justPressed(BTN_UP))   s_hold_up_since   = SDL_GetTicks();
+            if (PAD_justPressed(BTN_DOWN)) s_hold_down_since = SDL_GetTicks();
+
+            if (PAD_justRepeated(BTN_UP) && list_count > 0) {
+                int step = scroll_step(s_hold_up_since);
+                list_selected = list_selected >= step ? list_selected - step : 0;
+                dirty = 1;
+            } else if (PAD_justRepeated(BTN_DOWN) && list_count > 0) {
+                int step = scroll_step(s_hold_down_since);
+                int cap = list_count - 1;
+                list_selected = list_selected + step <= cap ? list_selected + step : cap;
+                dirty = 1;
+            } else if (PAD_justPressed(BTN_A) && list_count > 0) {
+                bool same_track = playing_rating_key() == list_tracks[list_selected].rating_key;
+                if (!same_track) {
+                    plex_queue_set(cfg, list_tracks, list_count, list_selected);
+                    PlayerModule_queueChanged();
+                }
+                return MODULE_PLAYER;
+            } else if (PAD_justPressed(BTN_Y) && list_count > 0) {
+                plex_favorites_toggle(&list_tracks[list_selected]);
+                dirty = 1;
+            } else if (PAD_justPressed(BTN_B)) {
+                state = BROWSE_PLAYLISTS;
+                dirty = 1;
+                GFX_sync();
+                continue;
+            }
+
+            if (dirty) {
+                if (list_count == 0) {
+                    render_empty_state(screen, "This playlist is empty", NULL, NULL);
+                } else {
+                    TrackLabelCtx tctx;
+                    tctx.tracks             = list_tracks;
+                    tctx.count              = list_count;
+                    tctx.show_favorites     = true;
+                    tctx.show_artist        = true;
+                    tctx.playing_rating_key = playing_rating_key();
+                    render_browse_screen(screen, list_title,
+                                         list_selected, &list_scroll,
+                                         list_count,
+                                         NULL, NULL, NULL, NULL,
+                                         track_get_label, &tctx,
+                                         "PLAY", "BACK", 0);
+                    GFX_blitButtonGroup((char*[]){"Y", "FAVORITE", NULL}, 0, screen, 0);
+                }
+                GFX_flip(screen);
+                dirty = 0;
+            } else {
+                GFX_sync();
+            }
+
+        /* ==============================================================
+         * BROWSE_SEARCH — results for search_query
+         * ============================================================== */
+        } else if (state == BROWSE_SEARCH) {
+
+            if (search_ls == LOAD_IDLE) {
+                s_kick_extra.search = &search_results;
+                snprintf(s_kick_extra.query, sizeof(s_kick_extra.query), "%s", search_query);
+                browse_load_kick(BROWSE_SEARCH, cfg, cfg->library_id, 0, 0,
+                                 NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+                search_ls = LOAD_RUNNING;
+            }
+            if (search_ls == LOAD_RUNNING) {
+                LoadState ws = browse_load_poll();
+                if (ws == LOAD_DONE || ws == LOAD_ERROR) {
+                    search_ls = ws;
+                } else {
+                    render_loading(screen, true);
+                    if (PAD_justPressed(BTN_B)) {
+                        s_load.cancel = true;
+                        search_ls = LOAD_IDLE;
+                        state = BROWSE_LIBRARIES;
+                        dirty = 1;
+                    }
+                    GFX_sync();
+                    continue;
+                }
+            }
+            if (search_ls == LOAD_DONE) {
+                browse_load_join();
+                net_auto_retries = 0;
+                search_ls = LOAD_READY;
+                dirty = 1;
+            }
+            if (search_ls == LOAD_ERROR) {
+                browse_load_join();
+                search_ls = LOAD_IDLE;
+                if (net_auto_retries < 3) {
+                    net_auto_retries++;
+                } else {
+                    net_auto_retries = 0;
+                    net_error_from = BROWSE_SEARCH;
+                    net_error_back = BROWSE_LIBRARIES;
+                    state = BROWSE_NET_ERROR;
+                }
+                dirty = 1;
+                GFX_sync();
+                continue;
+            }
+
+            int n_results = search_item_count(&search_results);
+
+            if (!PAD_isPressed(BTN_UP))    s_hold_up_since   = 0;
+            if (!PAD_isPressed(BTN_DOWN))  s_hold_down_since = 0;
+            if (PAD_justPressed(BTN_UP))   s_hold_up_since   = SDL_GetTicks();
+            if (PAD_justPressed(BTN_DOWN)) s_hold_down_since = SDL_GetTicks();
+
+            if (PAD_justRepeated(BTN_UP) && n_results > 0) {
+                int step = scroll_step(s_hold_up_since);
+                search_selected = search_selected >= step ? search_selected - step : 0;
+                dirty = 1;
+            } else if (PAD_justRepeated(BTN_DOWN) && n_results > 0) {
+                int step = scroll_step(s_hold_down_since);
+                int cap = n_results - 1;
+                search_selected = search_selected + step <= cap ? search_selected + step : cap;
+                dirty = 1;
+            } else if (PAD_justPressed(BTN_A) && n_results > 0) {
+                int i = search_selected;
+                if (i < search_results.artist_count) {
+                    /* Artist: their albums */
+                    selected_artist_rating_key = search_results.artists[i].rating_key;
+                    albums_back_state = BROWSE_SEARCH;
+                    albums_ls      = LOAD_IDLE;
+                    album_selected = 0;
+                    album_scroll   = 0;
+                    last_art_thumb[0] = '\0';
+                    plex_art_clear();
+                    state = BROWSE_ALBUMS;
+                } else if ((i -= search_results.artist_count) < search_results.album_count) {
+                    /* Album: its tracks */
+                    search_album = search_results.albums[i];
+                    selected_album_rating_key = search_album.rating_key;
+                    snprintf(selected_album_thumb, sizeof(selected_album_thumb), "%s",
+                             search_album.thumb);
+                    tracks_ls         = LOAD_IDLE;
+                    track_selected    = 0;
+                    track_scroll      = 0;
+                    tracks_back_state = BROWSE_SEARCH;
+                    last_art_thumb[0] = '\0';
+                    plex_art_clear();
+                    state = BROWSE_TRACKS;
+                } else {
+                    /* Track: play the matching tracks from this one */
+                    i -= search_results.album_count;
+                    if (playing_rating_key() != search_results.tracks[i].rating_key) {
+                        plex_queue_set(cfg, search_results.tracks, search_results.track_count, i);
+                        PlayerModule_queueChanged();
+                    }
+                    return MODULE_PLAYER;
+                }
+                dirty = 1;
+                GFX_sync();
+                continue;
+            } else if (PAD_justPressed(BTN_Y)) {
+                /* New search, starting from the current text */
+                if (UI_keyboard(screen, "Search", search_query, sizeof(search_query))) {
+                    search_ls       = LOAD_IDLE;
+                    search_selected = 0;
+                    search_scroll   = 0;
+                }
+                dirty = 1;
+                GFX_sync();
+                continue;
+            } else if (PAD_justPressed(BTN_B)) {
+                state = BROWSE_LIBRARIES;
+                dirty = 1;
+                GFX_sync();
+                continue;
+            }
+
+            if (dirty) {
+                char header[sizeof(search_query) + 16];
+                snprintf(header, sizeof(header), "Search: %s", search_query);
+                if (n_results == 0) {
+                    render_empty_state(screen, "Nothing found", search_query, "SEARCH");
+                } else {
+                    render_browse_screen(screen, header,
+                                         search_selected, &search_scroll,
+                                         n_results,
+                                         NULL, NULL, NULL, NULL,
+                                         search_get_label, &search_results,
+                                         "OPEN", "BACK", 0);
+                    GFX_blitButtonGroup((char*[]){"Y", "SEARCH", NULL}, 0, screen, 0);
+                }
                 GFX_flip(screen);
                 dirty = 0;
             } else {
@@ -2831,6 +3322,9 @@ AppModule module_browse_run(SDL_Surface *screen)
                     case BROWSE_ALL_ALBUMS_PAGE:
                         all_albums_ls = LOAD_IDLE; break;
                     case BROWSE_RECENT_ALBUMS:  recent_albums_ls = LOAD_IDLE; break;
+                    case BROWSE_PLAYLISTS:      playlists_ls     = LOAD_IDLE; break;
+                    case BROWSE_TRACK_LIST:     list_ls          = LOAD_IDLE; break;
+                    case BROWSE_SEARCH:         search_ls        = LOAD_IDLE; break;
                     default: break;
                 }
                 state = net_error_from;

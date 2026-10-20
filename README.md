@@ -12,6 +12,8 @@ PlexMusic.pak is a music player for the TrimUI Brick that streams music from a P
 
 **Browsing**
 - Browse by Artists → Albums → Tracks or jump straight to a flat Albums view sorted by release year
+- Playlists: your Plex music playlists (regular and smart) — A plays from the selected track
+- Search: find artists, albums and tracks with the on-screen keyboard
 - Album art displayed alongside every list
 - Animated loading screen with instant B-button cancel on any in-progress load
 
@@ -89,7 +91,19 @@ Tools/tg5040/PlexMusic.pak/
 | L1 / R1 | Jump to previous/next letter or year |
 | SELECT | Toggle offline mode |
 | Y (on album) | Download album for offline use |
-| Y (on Favorite Tracks, online) | Sync favorites for offline use |
+| Y (on Favorite Tracks, online) | Sync favorites with Plex and download them for offline use |
+| Y (in a track list) | Toggle favorite |
+| Y (on search results) | New search |
+
+**On-screen keyboard (Search)**
+
+| Button | Action |
+|---|---|
+| D-pad | Move |
+| A | Type the key (or SPACE / DEL / OK) |
+| B | Delete (cancel when empty) |
+| X | Space |
+| Y | Search |
 
 **Now Playing**
 

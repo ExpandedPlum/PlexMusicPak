@@ -62,6 +62,8 @@ PlexMusic.pak is a music player for the TrimUI Brick that streams music from a P
 
 ## Installation
 
+This is a fork of [thwonp/PlexMusicPak](https://github.com/thwonp/PlexMusicPak). Its `pak.json` has its own name and points at this repository, so the Pak Store doesn't treat it as the original "Plex Music" and won't replace it with an upstream update. Install it by copying it to the SD card as below rather than from the Pak Store, and don't install "Plex Music" from the store alongside it (both would use the same settings folder).
+
 ```
 Tools/tg5040/PlexMusic.pak/
   launch.sh

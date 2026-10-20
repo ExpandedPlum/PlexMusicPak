@@ -537,7 +537,8 @@ AppModule module_settings_run(SDL_Surface *screen)
         } else if (state == SETTINGS_STATE_SIGNOUT_CONFIRM) {
 
             if (PAD_justPressed(BTN_A)) {
-                /* Confirmed — zero config, save, clear art, reset browse, go to auth */
+                /* Confirmed — stop playback, zero config, save, clear art, reset browse, go to auth */
+                plexd_cmd("/stop");
                 PlexConfig *cfg = plex_config_get_mutable();
                 char client_id[sizeof(cfg->client_id)];
                 memcpy(client_id, cfg->client_id, sizeof(client_id));

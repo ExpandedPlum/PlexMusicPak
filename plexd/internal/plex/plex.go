@@ -12,10 +12,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"sync"
 	"time"
@@ -126,8 +128,37 @@ type Client struct {
 	selected time.Time
 }
 
+// plexDirectIP matches the IP that a plex.direct hostname encodes:
+// 192-168-1-5.<hash>.plex.direct -> 192.168.1.5.
+var plexDirectIP = regexp.MustCompile(`^(\d{1,3})-(\d{1,3})-(\d{1,3})-(\d{1,3})\.[0-9a-f]+\.plex\.direct$`)
+
+// dialPlexDirect falls back to the encoded IP when a plex.direct name doesn't
+// resolve: routers with DNS-rebinding protection refuse names that point at
+// private addresses. TLS still checks the certificate against the name.
+func dialPlexDirect(dial func(ctx context.Context, network, addr string) (net.Conn, error)) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := dial(ctx, network, addr)
+		var dnsErr *net.DNSError
+		if err == nil || !errors.As(err, &dnsErr) {
+			return conn, err
+		}
+		host, port, serr := net.SplitHostPort(addr)
+		m := plexDirectIP.FindStringSubmatch(host)
+		if serr != nil || m == nil {
+			return conn, err
+		}
+		ip := net.ParseIP(m[1] + "." + m[2] + "." + m[3] + "." + m[4])
+		if ip == nil {
+			return conn, err
+		}
+		log.Printf("plex: %s doesn't resolve; connecting to %s", host, ip)
+		return dial(ctx, network, net.JoinHostPort(ip.String(), port))
+	}
+}
+
 func New(cfgPath, version string) *Client {
 	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DialContext = dialPlexDirect((&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext)
 	t.TLSHandshakeTimeout = 8 * time.Second
 	t.ResponseHeaderTimeout = 30 * time.Second
 	return &Client{

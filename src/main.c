@@ -25,6 +25,7 @@
 #include "plex_queue.h"
 #include "plex_downloads.h"
 #include "plex_favorites.h"
+#include "plexd_client.h"
 
 /* Global quit flag, set by signal handler */
 static volatile bool g_quit = false;
@@ -146,6 +147,10 @@ int main(int argc, char *argv[]) {
             current = next;
         }
     }
+
+    /* Music keeps playing in plexd after we exit; let its in-game buttons
+     * take over right away. */
+    plexd_set_foreground(false);
 
     /* --- Clean shutdown --- */
     PWR_enableAutosleep();

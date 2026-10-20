@@ -111,6 +111,7 @@ SOURCE = main.c \
          plex_downloads.c \
          plex_favorites.c \
          plex_net.c \
+         plexd_client.c \
          player.c \
          background.c \
          spectrum.c \

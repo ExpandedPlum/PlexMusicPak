@@ -1,44 +1,30 @@
 #include "background.h"
-#include "module_player.h"
-#include "player.h"
+#include "plexd_client.h"
 
-static BackgroundPlayerType active_bg = BG_NONE;
+/*
+ * Music plays in plexd, which outlives the UI, so "background playback" is
+ * whatever plexd has queued; these wrap its cached status (refreshed by
+ * Background_tick / plexd_tick).
+ */
 
 void Background_setActive(BackgroundPlayerType type) {
-    active_bg = type;
+    (void)type;   /* plexd's queue is the source of truth */
 }
 
 BackgroundPlayerType Background_getActive(void) {
-    return active_bg;
+    return plexd_has_queue() ? BG_MUSIC : BG_NONE;
 }
 
 void Background_stopAll(void) {
-    switch (active_bg) {
-        case BG_MUSIC:
-            Player_stop();
-            break;
-        case BG_NONE:
-            break;
-    }
-    active_bg = BG_NONE;
+    if (plexd_has_queue()) plexd_cmd("/stop");
+    plexd_tick();
 }
 
 bool Background_isPlaying(void) {
-    switch (active_bg) {
-        case BG_MUSIC:
-            return Player_getState() != PLAYER_STATE_STOPPED;
-        case BG_NONE:
-            break;
-    }
-    return false;
+    const PlexdStatus *st = plexd_cached_status();
+    return st->ok && (st->state == PLEXD_PLAYING || st->state == PLEXD_LOADING);
 }
 
 void Background_tick(void) {
-    switch (active_bg) {
-        case BG_MUSIC:
-            PlayerModule_backgroundTick();
-            break;
-        case BG_NONE:
-            break;
-    }
+    plexd_tick();
 }

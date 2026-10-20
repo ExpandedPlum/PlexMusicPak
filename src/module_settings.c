@@ -10,6 +10,7 @@
 #include "plex_art.h"
 #include "plex_auth.h"
 #include "plex_net.h"
+#include "plexd_client.h"
 #include "plex_config.h"
 #include "plex_models.h"
 #include "ui_fonts.h"
@@ -33,9 +34,10 @@ typedef enum {
 #define SETTINGS_ITEM_STREAM_BITRATE   3
 #define SETTINGS_ITEM_DOWNLOAD_BITRATE 4
 #define SETTINGS_ITEM_POCKET_LOCK      5
-#define SETTINGS_ITEM_PRELOAD_COUNT    6
-#define SETTINGS_ITEM_SIGN_OUT         7
-#define SETTINGS_ITEM_COUNT            8
+#define SETTINGS_ITEM_MUTE_GAMES       6
+#define SETTINGS_ITEM_HOTKEYS          7
+#define SETTINGS_ITEM_SIGN_OUT         8
+#define SETTINGS_ITEM_COUNT            9
 
 /* Milliseconds to show "Server updated." confirmation */
 #define SERVER_UPDATED_PAUSE_MS 1500
@@ -88,16 +90,6 @@ static int bitrate_index(int kbps)
     for (int i = 0; i < BITRATE_COUNT; i++)
         if (BITRATE_VALUES[i] == kbps) return i;
     return 0;
-}
-
-/* Human-readable label for a preload_count value */
-static const char *preload_count_label(int count)
-{
-    if (count == 0) return "Off";
-    if (count == 1) return "1 track";
-    static char buf[16];
-    snprintf(buf, sizeof(buf), "%d tracks", count);
-    return buf;
 }
 
 /* =========================================================================
@@ -156,9 +148,14 @@ static void render_settings_menu(SDL_Surface *screen, int show_setting,
              "Pocket Button Lock: %s",
              cfg->pocket_lock_enabled ? "MENU+SELECT" : "Off");
 
-    char preload_count_lbl[32];
-    snprintf(preload_count_lbl, sizeof(preload_count_lbl),
-             "Track Preload: %s", preload_count_label(cfg->preload_count));
+    /* Playback settings live in plexd */
+    const PlexdStatus *pst = plexd_cached_status();
+    char mute_games_lbl[48];
+    snprintf(mute_games_lbl, sizeof(mute_games_lbl), "Mute Games While Playing: %s",
+             !pst->ok ? "?" : pst->mute_games ? "On" : "Off");
+    char hotkeys_lbl[48];
+    snprintf(hotkeys_lbl, sizeof(hotkeys_lbl), "In-Game Controls: %s",
+             !pst->ok ? "?" : pst->hotkeys ? "On" : "Off");
 
     const char *labels[SETTINGS_ITEM_COUNT] = {
         server_label,
@@ -167,7 +164,8 @@ static void render_settings_menu(SDL_Surface *screen, int show_setting,
         stream_bitrate_label,
         download_bitrate_label,
         pocket_lock_label,
-        preload_count_lbl,
+        mute_games_lbl,
+        hotkeys_lbl,
         "Sign Out",
     };
 
@@ -388,10 +386,11 @@ AppModule module_settings_run(SDL_Surface *screen)
                     cfg->pocket_lock_enabled = !cfg->pocket_lock_enabled;
                     plex_config_save(cfg);
                     dirty = 1;
-                } else if (menu_selected == SETTINGS_ITEM_PRELOAD_COUNT) {
-                    PlexConfig *cfg = plex_config_get_mutable();
-                    cfg->preload_count = (cfg->preload_count + 1) % 11;
-                    plex_config_save(cfg);
+                } else if (menu_selected == SETTINGS_ITEM_MUTE_GAMES) {
+                    plexd_set_mute_games(!plexd_cached_status()->mute_games);
+                    dirty = 1;
+                } else if (menu_selected == SETTINGS_ITEM_HOTKEYS) {
+                    plexd_set_hotkeys(!plexd_cached_status()->hotkeys);
                     dirty = 1;
                 }
             } else if (PAD_justPressed(BTN_LEFT)) {
@@ -421,10 +420,11 @@ AppModule module_settings_run(SDL_Surface *screen)
                     cfg->pocket_lock_enabled = !cfg->pocket_lock_enabled;
                     plex_config_save(cfg);
                     dirty = 1;
-                } else if (menu_selected == SETTINGS_ITEM_PRELOAD_COUNT) {
-                    PlexConfig *cfg = plex_config_get_mutable();
-                    cfg->preload_count = (cfg->preload_count + 10) % 11;
-                    plex_config_save(cfg);
+                } else if (menu_selected == SETTINGS_ITEM_MUTE_GAMES) {
+                    plexd_set_mute_games(!plexd_cached_status()->mute_games);
+                    dirty = 1;
+                } else if (menu_selected == SETTINGS_ITEM_HOTKEYS) {
+                    plexd_set_hotkeys(!plexd_cached_status()->hotkeys);
                     dirty = 1;
                 }
             } else if (PAD_justPressed(BTN_B)) {

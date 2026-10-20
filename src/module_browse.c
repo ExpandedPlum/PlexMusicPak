@@ -20,6 +20,7 @@
 #include "plex_config.h"
 #include "plex_models.h"
 #include "plex_queue.h"
+#include "plexd_client.h"
 #include "plex_downloads.h"
 #include "plex_favorites.h"
 #include "ui_fonts.h"
@@ -1029,12 +1030,12 @@ AppModule module_browse_run(SDL_Surface *screen)
             /* Build "Now Playing" label once per frame */
             char now_playing_label[PLEX_MAX_STR * 2 + 8] = "";
             if (bg_active) {
-                PlexQueue *q = plex_queue_get();
-                if (q && q->active && q->count > 0) {
+                const PlexdStatus *pst = plexd_cached_status();
+                if (pst->has_track) {
                     snprintf(now_playing_label, sizeof(now_playing_label),
-                             "\xe2\x96\xb6 %s - %s",
-                             q->tracks[q->current_index].title,
-                             q->tracks[q->current_index].artist);
+                             "%s %s - %s",
+                             pst->state == PLEXD_PAUSED ? "||" : "\xe2\x96\xb6",
+                             pst->track.title, pst->track.artist);
                 } else {
                     snprintf(now_playing_label, sizeof(now_playing_label),
                              "\xe2\x96\xb6 Now Playing");
@@ -2639,13 +2640,12 @@ AppModule module_browse_run(SDL_Surface *screen)
                 track_selected = (track_selected + step <= cap) ? track_selected + step : cap;
                 if (track_selected != prev) dirty = 1;
             } else if (PAD_justPressed(BTN_A) && track_count > 0) {
-                PlexQueue *q = plex_queue_get();
-                bool same_track = q->active &&
-                    q->tracks[q->current_index].rating_key == tracks[track_selected].rating_key;
+                const PlexdStatus *pst = plexd_cached_status();
+                bool same_track = plexd_has_queue() &&
+                    pst->track.rating_key == tracks[track_selected].rating_key;
                 if (!same_track) {
-                    Background_setActive(BG_NONE);
                     plex_queue_set(cfg, tracks, track_count, track_selected);
-                    PlayerModule_cancelPreload();
+                    PlayerModule_queueChanged();
                 }
                 return MODULE_PLAYER;
             } else if (PAD_justPressed(BTN_B)) {
@@ -2761,13 +2761,12 @@ AppModule module_browse_run(SDL_Surface *screen)
                 fav_selected = (fav_selected + step <= cap) ? fav_selected + step : (cap >= 0 ? cap : 0);
                 if (fav_selected != prev) dirty = 1;
             } else if (PAD_justPressed(BTN_A) && s_fav_count > 0) {
-                PlexQueue *q = plex_queue_get();
-                bool same_track = q->active &&
-                    q->tracks[q->current_index].rating_key == s_fav_tracks[fav_selected].rating_key;
+                const PlexdStatus *pst = plexd_cached_status();
+                bool same_track = plexd_has_queue() &&
+                    pst->track.rating_key == s_fav_tracks[fav_selected].rating_key;
                 if (!same_track) {
-                    Background_setActive(BG_NONE);
                     plex_queue_set(cfg, s_fav_tracks, s_fav_count, fav_selected);
-                    PlayerModule_cancelPreload();
+                    PlayerModule_queueChanged();
                 }
                 return MODULE_PLAYER;
             } else if (PAD_justPressed(BTN_B)) {

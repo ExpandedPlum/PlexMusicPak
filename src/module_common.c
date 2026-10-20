@@ -7,6 +7,7 @@
 #include "player.h"
 #include "spectrum.h"
 #include "background.h"
+#include "plexd_client.h"
 #include "settings.h"
 // removed: #include "module_player.h"  (module not in PlexMusic.pak)
 // removed: #include "ui_main.h"        (module not in PlexMusic.pak)
@@ -74,23 +75,19 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
             result.input_consumed = true;
         }
         else if (hid_event == USB_HID_EVENT_PLAY_PAUSE) {
-            // Check what's currently playing and handle accordingly
-            // removed: Radio check (Radio not active in PlexMusic.pak)
-            PlayerState player_state = Player_getState();
-
-            if (player_state == PLAYER_STATE_PLAYING || player_state == PLAYER_STATE_PAUSED) {
-                // Music player is active - toggle pause
-                Player_togglePause();
+            // Music plays in plexd
+            if (plexd_has_queue()) {
+                plexd_cmd("/toggle");
                 result.dirty = true;
                 result.input_consumed = true;
             }
-            // removed: resume radio fallback (Radio not active in PlexMusic.pak)
         }
         else if (hid_event == USB_HID_EVENT_NEXT_TRACK || hid_event == USB_HID_EVENT_PREV_TRACK) {
-            // Next/previous track
-            // removed: Radio station switching (Radio not active in PlexMusic.pak)
-            // removed: PlayerModule_isActive / PlayerModule_nextTrack / PlayerModule_prevTrack
-            // (PlayerModule not in PlexMusic.pak; track control handled within individual modules)
+            if (plexd_has_queue()) {
+                plexd_cmd(hid_event == USB_HID_EVENT_NEXT_TRACK ? "/next" : "/prev");
+                result.dirty = true;
+                result.input_consumed = true;
+            }
         }
     }
 
@@ -282,6 +279,9 @@ void ModuleCommon_PWR_update(int* dirty, int* show_setting) {
         overlay_release_time = SDL_GetTicks();
     }
 
+    // Tell plexd the UI is in front (its in-game buttons stay off); throttled
+    plexd_tick();
+
     // Call platform PWR_update, passing and consuming the one-shot after-sleep callback
     PWR_update(dirty, show_setting, NULL, s_after_sleep_cb);
     s_after_sleep_cb = NULL;
@@ -317,6 +317,7 @@ bool ModuleCommon_handleHIDVolume(USBHIDEvent hid_event) {
     SetVolume(vol);
     float v = vol / 20.0f;
     Player_setVolume(v * v * v);
+    plexd_set_volume(v * v * v);
     return true;
 }
 
@@ -334,5 +335,6 @@ void ModuleCommon_handleHardwareVolume(void) {
         int vol = GetVolume();
         float v = vol / 20.0f;
         Player_setVolume(v * v * v);
+        plexd_set_volume(v * v * v);
     }
 }

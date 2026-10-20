@@ -7,26 +7,21 @@
 /*
  * Run the player module (now-playing screen).
  *
- * Prerequisites: plex_queue_get() must return an active queue with
- * current_index and stream_url already set.
+ * Playback itself runs in plexd (see plexd_client.h), so it carries on after
+ * this screen or the whole app exits. If PlayerModule_queueChanged() was
+ * called, the queue in plex_queue_get() is sent to plexd first; otherwise
+ * this shows what plexd is already playing.
  *
  * Returns the next AppModule:
- *   MODULE_BROWSE — user pressed B (back)
- *   MODULE_QUIT   — user pressed Start+long or quit
+ *   MODULE_BROWSE — user pressed B (back) or X (stop), or the queue ended
+ *   MODULE_QUIT   — user quit (music keeps playing)
  */
 AppModule module_player_run(SDL_Surface *screen);
 
 /*
- * Called once per frame from the browse module's main loop while BG_MUSIC
- * is active.  Handles background download completion, scrobbling, and
- * auto-advance to the next track.  Must not block.
+ * Mark plex_queue_get() as a new queue for the next module_player_run() to
+ * start. Call after plex_queue_set().
  */
-void PlayerModule_backgroundTick(void);
-
-/*
- * Cancel all in-flight preload downloads and discard cached preload files.
- * Call when the queue order changes (new album selected, etc.).
- */
-void PlayerModule_cancelPreload(void);
+void PlayerModule_queueChanged(void);
 
 #endif /* MODULE_PLAYER_H */

@@ -8,12 +8,16 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <sys/stat.h>
+#include <dirent.h>
+#include <utime.h>
+#include <unistd.h>
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 
 #include "api.h"
 #include "plex_log.h"
+#include "file_util.h"
 
 /* ------------------------------------------------------------------
  * Module state
@@ -128,10 +132,8 @@ static SDL_Surface *load_surface_from_file(const char *path)
 
 static void save_to_cache(const char *path, const uint8_t *data, int size)
 {
-    FILE *f = fopen(path, "wb");
-    if (!f) return;
-    fwrite(data, 1, (size_t)size, f);
-    fclose(f);
+    /* A half-written image would be served from the cache forever */
+    write_file_atomic(path, data, (size_t)size);
 }
 
 /* ------------------------------------------------------------------
@@ -188,6 +190,7 @@ static void *fetch_thread_func(void *arg)
     if (!art_ctx.should_stop) {
         SDL_Surface *cached = load_surface_from_file(cache_path);
         if (cached) {
+            utime(cache_path, NULL);   /* recently shown: last to be pruned */
             bool still_current = (my_generation == art_ctx.generation) && !art_ctx.should_stop;
             if (still_current) {
                 if (art_ctx.pending_surface)
@@ -287,6 +290,108 @@ static void *fetch_thread_func(void *arg)
 /* ------------------------------------------------------------------
  * Public API
  * ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------
+ * Cache pruning
+ * ------------------------------------------------------------------ */
+
+typedef struct {
+    char   name[16];   /* "%08x.jpg" */
+    time_t mtime;
+    long   size;
+} CacheEntry;
+
+typedef struct {
+    long          max_bytes, target_bytes;
+    unsigned int *keep;   /* hashes of thumbs never to delete */
+    int           keep_count;
+} PruneJob;
+
+static int by_mtime(const void *a, const void *b)
+{
+    time_t x = ((const CacheEntry *)a)->mtime, y = ((const CacheEntry *)b)->mtime;
+    return (x > y) - (x < y);
+}
+
+static void *prune_worker(void *arg)
+{
+    PruneJob *job = arg;
+    const char *base = getenv("SHARED_USERDATA_PATH");
+    if (!base || base[0] == '\0') base = "/mnt/SDCARD/.userdata/shared";
+    char dir_path[768];
+    snprintf(dir_path, sizeof(dir_path), "%s/plexmusic/art", base);
+
+    CacheEntry *entries = NULL;
+    int count = 0, cap = 0;
+    long total = 0;
+    DIR *dir = opendir(dir_path);
+    struct dirent *de;
+    while (dir && (de = readdir(dir)) != NULL) {
+        unsigned int hash;
+        char tail[8];
+        if (sscanf(de->d_name, "%8x.%4s", &hash, tail) != 2 || strcmp(tail, "jpg") != 0)
+            continue;
+        char path[1024];
+        struct stat st;
+        snprintf(path, sizeof(path), "%s/%s", dir_path, de->d_name);
+        if (stat(path, &st) != 0) continue;
+        total += (long)st.st_size;
+        if (count == cap) {
+            cap = cap ? cap * 2 : 1024;
+            CacheEntry *ne = realloc(entries, cap * sizeof(CacheEntry));
+            if (!ne) break;
+            entries = ne;
+        }
+        snprintf(entries[count].name, sizeof(entries[count].name), "%s", de->d_name);
+        entries[count].mtime = st.st_mtime;
+        entries[count].size  = (long)st.st_size;
+        count++;
+    }
+    if (dir) closedir(dir);
+
+    if (total > job->max_bytes) {
+        qsort(entries, count, sizeof(CacheEntry), by_mtime);
+        int removed = 0;
+        for (int i = 0; i < count && total > job->target_bytes; i++) {
+            unsigned int hash = 0;
+            sscanf(entries[i].name, "%8x", &hash);
+            bool keep = false;
+            for (int k = 0; k < job->keep_count && !keep; k++)
+                keep = job->keep[k] == hash;
+            if (keep) continue;
+            char path[1024];
+            snprintf(path, sizeof(path), "%s/%s", dir_path, entries[i].name);
+            if (unlink(path) == 0) {
+                total -= entries[i].size;
+                removed++;
+            }
+        }
+        PLEX_LOG("[PlexArt] cache pruned: %d images removed, %ld KB left\n", removed, total / 1024);
+    }
+    free(entries);
+    free(job->keep);
+    free(job);
+    return NULL;
+}
+
+void plex_art_prune_cache_async(long max_bytes, long target_bytes,
+                                const char *const *keep_thumbs, int keep_count)
+{
+    PruneJob *job = calloc(1, sizeof(*job));
+    if (!job) return;
+    job->max_bytes    = max_bytes;
+    job->target_bytes = target_bytes;
+    job->keep = keep_count > 0 ? malloc(keep_count * sizeof(unsigned int)) : NULL;
+    for (int i = 0; job->keep && i < keep_count; i++)
+        job->keep[job->keep_count++] = djb2_hash(keep_thumbs[i]);
+    pthread_t th;
+    if (pthread_create(&th, NULL, prune_worker, job) == 0) {
+        pthread_detach(th);
+    } else {
+        free(job->keep);
+        free(job);
+    }
+}
 
 void plex_art_init(void)
 {

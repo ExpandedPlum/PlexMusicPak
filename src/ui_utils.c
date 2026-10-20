@@ -846,3 +846,15 @@ void render_toast(SDL_Surface* screen, const char* message, uint32_t toast_time)
 void clear_toast(void) {
     PLAT_clearLayers(LAYER_TOAST);
 }
+
+void render_status_message(SDL_Surface* screen, const char* message) {
+    SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x12, 0x12, 0x12));
+
+    SDL_Surface* text = TTF_RenderUTF8_Blended(Fonts_getMedium(), message, COLOR_WHITE);
+    if (text) {
+        SDL_BlitSurface(text, NULL, screen,
+                        &(SDL_Rect){(screen->w - text->w) / 2, (screen->h - text->h) / 2});
+        SDL_FreeSurface(text);
+    }
+    GFX_flip(screen);
+}

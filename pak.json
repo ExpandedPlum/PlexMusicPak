@@ -1,12 +1,12 @@
 {
   "type": "TOOL",
-  "name": "Plex Music",
+  "name": "Plex Music (ExpandedPlum)",
   "version": "1.0.31",
-  "description": "Plex music client for NextUI",
+  "description": "Plex music client for NextUI that keeps playing in games (fork of thwonp/PlexMusicPak)",
   "platforms": [
     "tg5040"
   ],
-  "author": "Thwonp",
-  "repo_url": "https://github.com/thwonp/PlexMusicPak",
+  "author": "Thwonp, ExpandedPlum",
+  "repo_url": "https://github.com/ExpandedPlum/PlexMusicPak",
   "release_filename": "PlexMusic.pak.zip"
 }

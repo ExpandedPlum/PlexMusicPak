@@ -9,6 +9,8 @@
 #include "module_settings.h"
 #include "plex_art.h"
 #include "plex_auth.h"
+#include "plex_net.h"
+#include "plexd_client.h"
 #include "plex_config.h"
 #include "plex_models.h"
 #include "ui_fonts.h"
@@ -32,9 +34,10 @@ typedef enum {
 #define SETTINGS_ITEM_STREAM_BITRATE   3
 #define SETTINGS_ITEM_DOWNLOAD_BITRATE 4
 #define SETTINGS_ITEM_POCKET_LOCK      5
-#define SETTINGS_ITEM_PRELOAD_COUNT    6
-#define SETTINGS_ITEM_SIGN_OUT         7
-#define SETTINGS_ITEM_COUNT            8
+#define SETTINGS_ITEM_MUTE_GAMES       6
+#define SETTINGS_ITEM_HOTKEYS          7
+#define SETTINGS_ITEM_SIGN_OUT         8
+#define SETTINGS_ITEM_COUNT            9
 
 /* Milliseconds to show "Server updated." confirmation */
 #define SERVER_UPDATED_PAUSE_MS 1500
@@ -89,16 +92,6 @@ static int bitrate_index(int kbps)
     return 0;
 }
 
-/* Human-readable label for a preload_count value */
-static const char *preload_count_label(int count)
-{
-    if (count == 0) return "Off";
-    if (count == 1) return "1 track";
-    static char buf[16];
-    snprintf(buf, sizeof(buf), "%d tracks", count);
-    return buf;
-}
-
 /* =========================================================================
  * Render helpers
  * ========================================================================= */
@@ -119,9 +112,12 @@ static void render_settings_menu(SDL_Surface *screen, int show_setting,
     ListLayout layout = calc_list_layout(screen);
 
     /* --- Selectable menu items --- */
-    char server_label[PLEX_MAX_STR + 12];
-    if (cfg->server_name[0])
+    char server_label[PLEX_MAX_STR + 24];
+    if (cfg->server_name[0] && cfg->offline_mode)
         snprintf(server_label, sizeof(server_label), "Server: %s", cfg->server_name);
+    else if (cfg->server_name[0])
+        snprintf(server_label, sizeof(server_label), "Server: %s (%s)", cfg->server_name,
+                 plex_conn_kind_label(cfg->server_kind));
     else
         snprintf(server_label, sizeof(server_label), "Server: (unknown)");
 
@@ -135,9 +131,13 @@ static void render_settings_menu(SDL_Surface *screen, int show_setting,
     snprintf(timeout_label, sizeof(timeout_label), "Screen timeout: %s",
              screen_timeout_label(cfg->screen_timeout));
 
-    char stream_bitrate_label[32];
-    snprintf(stream_bitrate_label, sizeof(stream_bitrate_label),
-             "Streaming Quality: %s", bitrate_label(cfg->stream_bitrate_kbps));
+    char stream_bitrate_label[64];
+    if (plex_config_stream_kbps(cfg) != cfg->stream_bitrate_kbps)
+        snprintf(stream_bitrate_label, sizeof(stream_bitrate_label),
+                 "Streaming Quality: Original (%d kbps on relay)", plex_config_stream_kbps(cfg));
+    else
+        snprintf(stream_bitrate_label, sizeof(stream_bitrate_label),
+                 "Streaming Quality: %s", bitrate_label(cfg->stream_bitrate_kbps));
 
     char download_bitrate_label[32];
     snprintf(download_bitrate_label, sizeof(download_bitrate_label),
@@ -148,9 +148,14 @@ static void render_settings_menu(SDL_Surface *screen, int show_setting,
              "Pocket Button Lock: %s",
              cfg->pocket_lock_enabled ? "MENU+SELECT" : "Off");
 
-    char preload_count_lbl[32];
-    snprintf(preload_count_lbl, sizeof(preload_count_lbl),
-             "Track Preload: %s", preload_count_label(cfg->preload_count));
+    /* Playback settings live in plexd */
+    const PlexdStatus *pst = plexd_cached_status();
+    char mute_games_lbl[48];
+    snprintf(mute_games_lbl, sizeof(mute_games_lbl), "Mute Games While Playing: %s",
+             !pst->ok ? "?" : pst->mute_games ? "On" : "Off");
+    char hotkeys_lbl[48];
+    snprintf(hotkeys_lbl, sizeof(hotkeys_lbl), "In-Game Controls: %s",
+             !pst->ok ? "?" : pst->hotkeys ? "On" : "Off");
 
     const char *labels[SETTINGS_ITEM_COUNT] = {
         server_label,
@@ -159,7 +164,8 @@ static void render_settings_menu(SDL_Surface *screen, int show_setting,
         stream_bitrate_label,
         download_bitrate_label,
         pocket_lock_label,
-        preload_count_lbl,
+        mute_games_lbl,
+        hotkeys_lbl,
         "Sign Out",
     };
 
@@ -211,22 +217,6 @@ static void render_servers_screen(SDL_Surface *screen, const PlexServer servers[
 /*
  * Render a brief loading indicator (blocking call is about to happen).
  */
-static void render_loading(SDL_Surface *screen, const char *msg)
-{
-    int hw = screen->w;
-    int hh = screen->h;
-
-    SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x12, 0x12, 0x12));
-
-    SDL_Surface *label = TTF_RenderUTF8_Blended(Fonts_getMedium(), msg, COLOR_WHITE);
-    if (label) {
-        SDL_BlitSurface(label, NULL, screen,
-                        &(SDL_Rect){(hw - label->w) / 2, (hh - label->h) / 2});
-        SDL_FreeSurface(label);
-    }
-    GFX_flip(screen);
-}
-
 /*
  * Render the server error screen.
  */
@@ -396,10 +386,11 @@ AppModule module_settings_run(SDL_Surface *screen)
                     cfg->pocket_lock_enabled = !cfg->pocket_lock_enabled;
                     plex_config_save(cfg);
                     dirty = 1;
-                } else if (menu_selected == SETTINGS_ITEM_PRELOAD_COUNT) {
-                    PlexConfig *cfg = plex_config_get_mutable();
-                    cfg->preload_count = (cfg->preload_count + 1) % 11;
-                    plex_config_save(cfg);
+                } else if (menu_selected == SETTINGS_ITEM_MUTE_GAMES) {
+                    plexd_set_mute_games(!plexd_cached_status()->mute_games);
+                    dirty = 1;
+                } else if (menu_selected == SETTINGS_ITEM_HOTKEYS) {
+                    plexd_set_hotkeys(!plexd_cached_status()->hotkeys);
                     dirty = 1;
                 }
             } else if (PAD_justPressed(BTN_LEFT)) {
@@ -429,10 +420,11 @@ AppModule module_settings_run(SDL_Surface *screen)
                     cfg->pocket_lock_enabled = !cfg->pocket_lock_enabled;
                     plex_config_save(cfg);
                     dirty = 1;
-                } else if (menu_selected == SETTINGS_ITEM_PRELOAD_COUNT) {
-                    PlexConfig *cfg = plex_config_get_mutable();
-                    cfg->preload_count = (cfg->preload_count + 10) % 11;
-                    plex_config_save(cfg);
+                } else if (menu_selected == SETTINGS_ITEM_MUTE_GAMES) {
+                    plexd_set_mute_games(!plexd_cached_status()->mute_games);
+                    dirty = 1;
+                } else if (menu_selected == SETTINGS_ITEM_HOTKEYS) {
+                    plexd_set_hotkeys(!plexd_cached_status()->hotkeys);
                     dirty = 1;
                 }
             } else if (PAD_justPressed(BTN_B)) {
@@ -455,7 +447,7 @@ AppModule module_settings_run(SDL_Surface *screen)
 
             /* Fetch servers on first entry into this state */
             if (!servers_loaded) {
-                render_loading(screen, "Loading servers...");
+                render_status_message(screen, "Loading servers...");
                 PlexConfig *cfg = plex_config_get_mutable();
                 server_count = 0;
                 int result = plex_auth_get_servers(cfg->token, servers, &server_count);
@@ -481,16 +473,13 @@ AppModule module_settings_run(SDL_Surface *screen)
                 dirty = 1;
             } else if (PAD_justPressed(BTN_A)) {
                 PlexConfig *cfg = plex_config_get_mutable();
-                strncpy(cfg->server_url, servers[server_selected].url, PLEX_MAX_URL - 1);
-                cfg->server_url[PLEX_MAX_URL - 1] = '\0';
-                strncpy(cfg->server_name, servers[server_selected].name, PLEX_MAX_STR - 1);
-                cfg->server_name[PLEX_MAX_STR - 1] = '\0';
-                strncpy(cfg->server_id, servers[server_selected].id, PLEX_MAX_STR - 1);
-                cfg->server_id[PLEX_MAX_STR - 1] = '\0';
+                plex_auth_apply_server(cfg, &servers[server_selected]);
+                render_status_message(screen, "Connecting to server...");
+                plex_auth_select_connection(cfg);
                 plex_config_save(cfg);
 
                 /* Brief confirmation message */
-                render_loading(screen, "Server updated.");
+                render_status_message(screen, "Server updated.");
                 SDL_Delay(SERVER_UPDATED_PAUSE_MS);
 
                 /* Return to settings menu */
@@ -548,9 +537,15 @@ AppModule module_settings_run(SDL_Surface *screen)
         } else if (state == SETTINGS_STATE_SIGNOUT_CONFIRM) {
 
             if (PAD_justPressed(BTN_A)) {
-                /* Confirmed — zero config, save, clear art, reset browse, go to auth */
+                /* Confirmed — stop playback, zero config, save, clear art, reset browse, go to auth */
+                plexd_cmd("/stop");
                 PlexConfig *cfg = plex_config_get_mutable();
-                memset(cfg, 0, sizeof(*cfg));
+                plex_config_sign_out(cfg);   /* preferences stay */
+                /* Keep this device's id; a legacy shared id is replaced so
+                 * the next sign-in gets a token of its own. */
+                if (strcmp(cfg->client_id, PLEX_LEGACY_CLIENT_ID) == 0)
+                    plex_config_new_client_id(cfg);
+                plex_net_set_client_id(cfg->client_id);
                 plex_config_save(cfg);
                 plex_art_clear();
                 module_browse_reset();

@@ -15,8 +15,9 @@
 #include "plex_config.h"
 #include "plex_net.h"
 #include "plex_art.h"
-#include "player.h"
+#include "audio_out.h"
 #include "ui_fonts.h"
+#include "ui_utils.h"
 #include "module_auth.h"
 #include "module_browse.h"
 #include "module_player.h"
@@ -24,6 +25,7 @@
 #include "plex_queue.h"
 #include "plex_downloads.h"
 #include "plex_favorites.h"
+#include "plexd_client.h"
 
 /* Global quit flag, set by signal handler */
 static volatile bool g_quit = false;
@@ -41,36 +43,6 @@ const PlexConfig *plex_config_get(void)
 PlexConfig *plex_config_get_mutable(void)
 {
     return &g_config;
-}
-
-/* Probe server_url; if unreachable and relay_url is set, switch for this session. */
-static void apply_relay_fallback(PlexConfig *cfg)
-{
-    PLEX_LOG("[Main] apply_relay_fallback: server_url=%s relay_url=%s\n",
-             cfg->server_url, cfg->relay_url);
-    if (!plex_config_is_valid(cfg) || cfg->relay_url[0] == '\0') return;
-
-    char identity_url[PLEX_MAX_URL + 16];
-    snprintf(identity_url, sizeof(identity_url), "%s/identity", cfg->server_url);
-
-    uint8_t probe_buf[4096];
-    /* timeout_sec=1: fail fast if primary URL is unreachable.
-     * PlexNetOptions has no max_retries field; plex_net.c handles retries
-     * internally but the short timeout limits total wait time. */
-    PlexNetOptions probe_opts = {
-        .method      = PLEX_HTTP_GET,
-        .body        = NULL,
-        .token       = cfg->token,
-        .timeout_sec = 1
-    };
-    int r = plex_net_fetch(identity_url, probe_buf, (int)sizeof(probe_buf), &probe_opts);
-    if (r > 0) {
-        PLEX_LOG("[Main] server_url reachable: %s\n", cfg->server_url);
-    } else {
-        PLEX_LOG("[Main] server_url unreachable, switching to relay_url: %s\n", cfg->relay_url);
-        strncpy(cfg->server_url, cfg->relay_url, sizeof(cfg->server_url) - 1);
-        cfg->server_url[sizeof(cfg->server_url) - 1] = '\0';
-    }
 }
 
 static void sig_handler(int sig) {
@@ -102,13 +74,21 @@ int main(int argc, char *argv[]) {
     WIFI_init();
     Fonts_load();
     plex_art_init();
-    if (Player_init() != 0) {
-        PLEX_LOG_ERROR("[Main] Player_init failed\n");
-        plex_log_flush();
-        return EXIT_FAILURE;
-    }
+    AudioOut_init();
 
     plex_downloads_init();
+
+    /* Cover art cache: prune to 120 MB once past 150 MB, keeping art for
+     * downloaded albums so offline browsing still has covers. */
+    {
+        PlexAlbum *albums = malloc(PLEX_MAX_OFFLINE_ITEMS * sizeof(PlexAlbum));
+        const char **keep = malloc(PLEX_MAX_OFFLINE_ITEMS * sizeof(char *));
+        int n = (albums && keep) ? plex_downloads_get_all_albums(albums, PLEX_MAX_OFFLINE_ITEMS) : 0;
+        for (int i = 0; i < n; i++) keep[i] = albums[i].thumb;
+        plex_art_prune_cache_async(150L << 20, 120L << 20, keep, n);
+        free(keep);
+        free(albums);
+    }
 
     plex_favorites_init();
 
@@ -122,13 +102,20 @@ int main(int argc, char *argv[]) {
      */
     memset(&g_config, 0, sizeof(g_config));
     plex_config_load(&g_config);
+    plex_config_ensure_client_id(&g_config);
+    plex_net_set_client_id(g_config.client_id);
+
+    /* plexd plays the music and makes our network requests (verifying HTTPS
+     * certificates); launch.sh starts it, this covers it not having done so.
+     * Without it, requests connect directly. */
+    plexd_ensure_running();
 
     if (!g_config.offline_mode) {
-        SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x12, 0x12, 0x12));
-        GFX_flip(screen);
-        if (plex_config_is_valid(&g_config))
+        render_status_message(screen, "Connecting to server...");
+        if (plex_config_is_valid(&g_config)) {
             plex_auth_refresh_server_urls(&g_config); /* best-effort; failure falls through to cached */
-        apply_relay_fallback(&g_config);
+            plex_auth_select_connection(&g_config);
+        }
     }
 
     /*
@@ -147,9 +134,8 @@ int main(int argc, char *argv[]) {
         case MODULE_AUTH:
             next = module_auth_run(screen);
             if (next == MODULE_BROWSE && !g_config.offline_mode) {
-                SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x12, 0x12, 0x12));
-                GFX_flip(screen);
-                apply_relay_fallback(&g_config);
+                render_status_message(screen, "Connecting to server...");
+                plex_auth_select_connection(&g_config);
             }
             break;
         case MODULE_BROWSE:
@@ -175,12 +161,16 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    /* Music keeps playing in plexd after we exit; let its in-game buttons
+     * take over right away. */
+    plexd_set_foreground(false);
+
     /* --- Clean shutdown --- */
     PWR_enableAutosleep();
     plex_downloads_quit();
     plex_favorites_quit();
     plex_art_cleanup();
-    Player_quit();
+    AudioOut_quit();
     Fonts_unload();
     PWR_quit();
     PAD_quit();

@@ -4,8 +4,9 @@
 #include <stdbool.h>
 #include "plex_models.h"
 
-/* Maximum tracks in a queue (one album at a time) */
-#define PLEX_QUEUE_MAX_TRACKS 200
+/* Maximum tracks in a queue: an album, or every favorite (plexd itself has
+ * no limit) */
+#define PLEX_QUEUE_MAX_TRACKS 512
 
 typedef enum {
     REPEAT_OFF = 0,

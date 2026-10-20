@@ -29,47 +29,26 @@ jobs:
           path: opencode/git/paks
           fetch-depth: 0
 
-      - name: Clone NextUI
-        run: git clone --depth 1 https://github.com/LoveRetro/NextUI.git opencode/NextUI
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: opencode/git/paks/plexd/go.mod
+          cache-dependency-path: opencode/git/paks/plexd/go.sum
 
-      - name: Create output dir
-        run: mkdir -p opencode/git/paks/bin/tg5040
+      - name: Cache ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: build/ffmpeg-bin
+          key: ffmpeg-tg5040-${{ hashFiles('opencode/git/paks/scripts/build-ffmpeg.sh') }}
 
       - name: Pull toolchain image
         run: docker pull ghcr.io/loveretro/tg5040-toolchain:latest
 
-      - name: Build libmsettings.so
-        run: |
-          WS=$GITHUB_WORKSPACE
-          docker run --rm \
-            -v "$WS:$WS" \
-            ghcr.io/loveretro/tg5040-toolchain:latest \
-            sh -c '
-              cd '"$WS"'/opencode/NextUI/workspace/tg5040/libmsettings
-              ${CROSS_COMPILE}gcc -c -fpic msettings.c
-              ${CROSS_COMPILE}gcc -shared -o libmsettings.so msettings.o -ltinyalsa -ldl -lrt
-              cp libmsettings.so '"$WS"'/opencode/git/paks/bin/tg5040/
-            '
-
-      - name: Build plexmusic.elf
-        run: |
-          WS=$GITHUB_WORKSPACE
-          docker run --rm \
-            -v "$WS:$WS" \
-            ghcr.io/loveretro/tg5040-toolchain:latest \
-            sh -c 'cd '"$WS"'/opencode/git/paks/src && make 2>&1'
-
-      - name: Package zip
-        run: |
-          mkdir -p staging/PlexMusic.pak
-          mkdir -p staging/PlexMusic.pak/bin/tg5040
-          cp opencode/git/paks/launch.sh staging/PlexMusic.pak/
-          cp opencode/git/paks/pak.json staging/PlexMusic.pak/
-          cp -r opencode/git/paks/res/ staging/PlexMusic.pak/res/
-          cp opencode/git/paks/bin/tg5040/plexmusic.elf staging/PlexMusic.pak/bin/tg5040/
-          cp opencode/git/paks/bin/tg5040/libmsettings.so staging/PlexMusic.pak/bin/tg5040/
-          jq --arg v "$VERSION" '.version = $v' staging/PlexMusic.pak/pak.json > tmp.json && mv tmp.json staging/PlexMusic.pak/pak.json
-          cd staging/PlexMusic.pak && zip -r "../../PlexMusic.pak.zip" .
+      # UI, libmsettings, ffmpeg and plexd, packaged as PlexMusic.pak.zip
+      - name: Build and package
+        env:
+          FFMPEG_CACHE: ${{ github.workspace }}/build/ffmpeg-bin
+        run: sh opencode/git/paks/scripts/build-pak.sh "$VERSION"
 
       - name: Bump pak.json version in repo
         run: |
@@ -102,4 +81,4 @@ jobs:
             --title "PlexMusic $VERSION" \
             $PRERELEASE_FLAG \
             --notes-file release_notes.txt \
-            "PlexMusic.pak.zip"
+            "PlexMusic.pak.zip" "PlexMusic-install.zip"

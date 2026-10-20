@@ -17,3 +17,12 @@ bool plex_favorites_contains(int rating_key);
 int  plex_favorites_get(PlexTrack *out, int max);
 
 int  plex_favorites_count(void);
+
+/*
+ * Two-way sync with Plex track ratings (five stars = loved in Plexamp):
+ * sends changes made offline or that failed to send, then adds tracks
+ * loved elsewhere in the current library. Blocks on the network (a few
+ * seconds). Returns the number of favorites added, or -1 if offline or the
+ * server couldn't be reached (queued changes are kept for next time).
+ */
+int  plex_favorites_sync_with_plex(const PlexConfig *cfg);

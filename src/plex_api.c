@@ -344,6 +344,27 @@ int plex_api_get_recent_albums(const PlexConfig *cfg, int section_id,
     return 0;
 }
 
+/* Fill al from one album's Metadata item */
+static void parse_album(JSON_Object *item, PlexAlbum *al)
+{
+    memset(al, 0, sizeof(*al));
+
+    const char *rk         = json_object_get_string(item, "ratingKey");
+    al->rating_key         = rk ? atoi(rk) : 0;
+    const char *prk        = json_object_get_string(item, "parentRatingKey");
+    al->artist_id          = prk ? atoi(prk) : 0;
+    const char *title      = json_object_get_string(item, "title");
+    const char *artist     = json_object_get_string(item, "parentTitle");
+    const char *thumb      = json_object_get_string(item, "thumb");
+    double year_d          = json_object_get_number(item, "year");
+
+    if (title)  strncpy(al->title,  title,  sizeof(al->title) - 1);
+    if (artist) strncpy(al->artist, artist, sizeof(al->artist) - 1);
+    if (thumb)  strncpy(al->thumb,  thumb,  sizeof(al->thumb) - 1);
+    if (year_d > 0)
+        snprintf(al->year, sizeof(al->year), "%d", (int)year_d);
+}
+
 /* ------------------------------------------------------------------
  * plex_api_get_albums
  * GET {server_url}/hubs/metadata/{artist_rating_key}?count=999
@@ -386,30 +407,57 @@ int plex_api_get_albums(const PlexConfig *cfg, int artist_rating_key,
             JSON_Object *item = json_array_get_object(meta, i);
             if (!item) continue;
 
-            PlexAlbum *al = &albums[*count];
-            memset(al, 0, sizeof(*al));
-
-            const char *rk         = json_object_get_string(item, "ratingKey");
-            al->rating_key         = rk ? atoi(rk) : 0;
-            const char *prk        = json_object_get_string(item, "parentRatingKey");
-            al->artist_id          = prk ? atoi(prk) : 0;
-            const char *title      = json_object_get_string(item, "title");
-            const char *artist     = json_object_get_string(item, "parentTitle");
-            const char *thumb      = json_object_get_string(item, "thumb");
-            double year_d          = json_object_get_number(item, "year");
-
-            if (title)  strncpy(al->title,  title,  sizeof(al->title) - 1);
-            if (artist) strncpy(al->artist, artist, sizeof(al->artist) - 1);
-            if (thumb)  strncpy(al->thumb,  thumb,  sizeof(al->thumb) - 1);
-            if (year_d > 0)
-                snprintf(al->year, sizeof(al->year), "%d", (int)year_d);
-
-            (*count)++;
+            parse_album(item, &albums[(*count)++]);
         }
     }
 
     json_value_free(root);
     return 0;
+}
+
+/* Fill t from one track's Metadata item: ratingKey, title,
+ * grandparentTitle, parentTitle, duration, index, thumb,
+ * Media[0].Part[0].key, Media[0].audioCodec, Media[0].bitrate */
+static void parse_track(JSON_Object *item, PlexTrack *t)
+{
+    memset(t, 0, sizeof(*t));
+
+    const char *rk         = json_object_get_string(item, "ratingKey");
+    t->rating_key          = rk ? atoi(rk) : 0;
+    t->duration_ms         = (int)json_object_get_number(item, "duration");
+    t->track_number        = (int)json_object_get_number(item, "index");
+
+    const char *title      = json_object_get_string(item, "title");
+    const char *artist     = json_object_get_string(item, "grandparentTitle");
+    const char *album      = json_object_get_string(item, "parentTitle");
+    const char *thumb      = json_object_get_string(item, "thumb");
+
+    if (title)  strncpy(t->title,  title,  sizeof(t->title) - 1);
+    if (artist) strncpy(t->artist, artist, sizeof(t->artist) - 1);
+    if (album)  strncpy(t->album,  album,  sizeof(t->album) - 1);
+    if (thumb)  strncpy(t->thumb,  thumb,  sizeof(t->thumb) - 1);
+
+    /* Extract media_key from Media[0].Part[0].key;
+     * also parse Media[0].audioCodec and Media[0].bitrate */
+    JSON_Array *media_arr = json_object_get_array(item, "Media");
+    if (media_arr && json_array_get_count(media_arr) > 0) {
+        JSON_Object *media = json_array_get_object(media_arr, 0);
+        if (media) {
+            const char *codec = json_object_get_string(media, "audioCodec");
+            if (codec) strncpy(t->audio_codec, codec, sizeof(t->audio_codec) - 1);
+            t->audio_bitrate_kbps = (int)json_object_get_number(media, "bitrate");
+
+            JSON_Array *part_arr = json_object_get_array(media, "Part");
+            if (part_arr && json_array_get_count(part_arr) > 0) {
+                JSON_Object *part = json_array_get_object(part_arr, 0);
+                if (part) {
+                    const char *key = json_object_get_string(part, "key");
+                    if (key)
+                        strncpy(t->media_key, key, sizeof(t->media_key) - 1);
+                }
+            }
+        }
+    }
 }
 
 /* ------------------------------------------------------------------
@@ -443,46 +491,7 @@ int plex_api_get_tracks(const PlexConfig *cfg, int album_rating_key,
         JSON_Object *item = json_array_get_object(meta, i);
         if (!item) continue;
 
-        PlexTrack *t = &tracks[*count];
-        memset(t, 0, sizeof(*t));
-
-        const char *rk         = json_object_get_string(item, "ratingKey");
-        t->rating_key          = rk ? atoi(rk) : 0;
-        t->duration_ms         = (int)json_object_get_number(item, "duration");
-        t->track_number        = (int)json_object_get_number(item, "index");
-
-        const char *title      = json_object_get_string(item, "title");
-        const char *artist     = json_object_get_string(item, "grandparentTitle");
-        const char *album      = json_object_get_string(item, "parentTitle");
-        const char *thumb      = json_object_get_string(item, "thumb");
-
-        if (title)  strncpy(t->title,  title,  sizeof(t->title) - 1);
-        if (artist) strncpy(t->artist, artist, sizeof(t->artist) - 1);
-        if (album)  strncpy(t->album,  album,  sizeof(t->album) - 1);
-        if (thumb)  strncpy(t->thumb,  thumb,  sizeof(t->thumb) - 1);
-
-        /* Extract media_key from Media[0].Part[0].key;
-         * also parse Media[0].audioCodec and Media[0].bitrate */
-        JSON_Array *media_arr = json_object_get_array(item, "Media");
-        if (media_arr && json_array_get_count(media_arr) > 0) {
-            JSON_Object *media = json_array_get_object(media_arr, 0);
-            if (media) {
-                const char *codec = json_object_get_string(media, "audioCodec");
-                if (codec) strncpy(t->audio_codec, codec, sizeof(t->audio_codec) - 1);
-                t->audio_bitrate_kbps = (int)json_object_get_number(media, "bitrate");
-
-                JSON_Array *part_arr = json_object_get_array(media, "Part");
-                if (part_arr && json_array_get_count(part_arr) > 0) {
-                    JSON_Object *part = json_array_get_object(part_arr, 0);
-                    if (part) {
-                        const char *key = json_object_get_string(part, "key");
-                        if (key)
-                            strncpy(t->media_key, key, sizeof(t->media_key) - 1);
-                    }
-                }
-            }
-        }
-
+        parse_track(item, &tracks[*count]);
         (*count)++;
     }
 
@@ -523,12 +532,12 @@ void plex_api_get_transcode_url(const PlexConfig *cfg, const PlexTrack *track,
              "&musicBitrate=%d"
              "&path=%%2Flibrary%%2Fmetadata%%2F%d"
              "&session=%s"
-             "&X-Plex-Client-Identifier=plexmusic-nextui"
+             "&X-Plex-Client-Identifier=%s"
              "&X-Plex-Client-Profile-Extra=%s"
              "&X-Plex-Session-Identifier=%s"
              "&X-Plex-Token=%s",
              cfg->server_url, bitrate_kbps, track->rating_key,
-             session_id, OPUS_PROFILE_EXTRA, session_id, cfg->token);
+             session_id, plex_net_client_id(), OPUS_PROFILE_EXTRA, session_id, cfg->token);
 
     snprintf(out_url, out_url_size, "%s", url);
 }
@@ -606,4 +615,211 @@ void plex_api_scrobble(const PlexConfig *cfg, int rating_key)
 
     plex_net_fetch(url, buf, 4096, &opts);  /* ignore errors */
     free(buf);
+}
+
+/* ------------------------------------------------------------------
+ * plex_api_rate
+ * PUT {server_url}/:/rate?key={rating_key}&rating={rating}
+ *     &identifier=com.plexapp.plugins.library
+ * rating 0-10 (10 = five stars, Plexamp's "love"); -1 clears it.
+ * ------------------------------------------------------------------ */
+int plex_api_rate(const PlexConfig *cfg, int rating_key, int rating)
+{
+    if (!cfg || cfg->server_url[0] == '\0') return -1;
+
+    char url[PLEX_MAX_URL + 256];
+    snprintf(url, sizeof(url),
+             "%s/:/rate?key=%d&rating=%d&identifier=com.plexapp.plugins.library",
+             cfg->server_url, rating_key, rating);
+
+    uint8_t buf[4096];
+    PlexNetOptions opts = {
+        .method      = PLEX_HTTP_PUT,
+        .body        = "",
+        .token       = cfg->token,
+        .timeout_sec = 8,
+        .no_retry    = true
+    };
+    return plex_net_fetch(url, buf, sizeof(buf), &opts) >= 0 ? 0 : -1;
+}
+
+/* ------------------------------------------------------------------
+ * plex_api_get_loved_tracks
+ * GET {server_url}/library/sections/{section_id}/all?type=10&userRating=10
+ * Tracks rated five stars (loved in Plexamp), up to max.
+ * ------------------------------------------------------------------ */
+int plex_api_get_loved_tracks(const PlexConfig *cfg, int section_id,
+                              PlexTrack tracks[], int max, int *count)
+{
+    if (!cfg || !tracks || !count) return -1;
+    *count = 0;
+
+    char path[256];
+    snprintf(path, sizeof(path),
+             "/library/sections/%d/all?type=10&userRating=10"
+             "&X-Plex-Container-Start=0&X-Plex-Container-Size=%d",
+             section_id, max);
+
+    JSON_Value *root = server_get(cfg, path);
+    if (!root) return -1;
+
+    JSON_Object *mc = json_object_dotget_object(
+                          json_value_get_object(root), "MediaContainer");
+    JSON_Array  *meta = mc ? json_object_get_array(mc, "Metadata") : NULL;
+    size_t total = meta ? json_array_get_count(meta) : 0;
+    for (size_t i = 0; i < total && *count < max; i++) {
+        JSON_Object *item = json_array_get_object(meta, i);
+        if (item) parse_track(item, &tracks[(*count)++]);
+    }
+
+    json_value_free(root);
+    return 0;
+}
+
+/* Percent-encode a query value (RFC 3986 unreserved characters pass). */
+static void url_encode_value(const char *src, char *dst, int dst_size)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    int j = 0;
+    for (int i = 0; src[i] && j < dst_size - 4; i++) {
+        unsigned char c = (unsigned char)src[i];
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+            c == '-' || c == '_' || c == '.' || c == '~') {
+            dst[j++] = (char)c;
+        } else {
+            dst[j++] = '%';
+            dst[j++] = hex[c >> 4];
+            dst[j++] = hex[c & 0x0F];
+        }
+    }
+    dst[j] = '\0';
+}
+
+/* ------------------------------------------------------------------
+ * plex_api_get_playlists
+ * GET {server_url}/playlists?playlistType=audio
+ * ------------------------------------------------------------------ */
+int plex_api_get_playlists(const PlexConfig *cfg, PlexPlaylist out[], int max, int *count)
+{
+    if (!cfg || !out || !count) return -1;
+    *count = 0;
+
+    JSON_Value *root = server_get(cfg, "/playlists?playlistType=audio");
+    if (!root) return -1;
+
+    JSON_Object *mc = json_object_dotget_object(
+                          json_value_get_object(root), "MediaContainer");
+    JSON_Array  *meta = mc ? json_object_get_array(mc, "Metadata") : NULL;
+    size_t total = meta ? json_array_get_count(meta) : 0;
+    for (size_t i = 0; i < total && *count < max; i++) {
+        JSON_Object *item = json_array_get_object(meta, i);
+        if (!item) continue;
+        PlexPlaylist *p = &out[*count];
+        memset(p, 0, sizeof(*p));
+        const char *rk    = json_object_get_string(item, "ratingKey");
+        const char *title = json_object_get_string(item, "title");
+        const char *thumb = json_object_get_string(item, "composite");
+        p->rating_key  = rk ? atoi(rk) : 0;
+        p->track_count = (int)json_object_get_number(item, "leafCount");
+        p->smart       = json_object_get_boolean(item, "smart") == 1;
+        if (title) strncpy(p->title, title, sizeof(p->title) - 1);
+        if (thumb) strncpy(p->thumb, thumb, sizeof(p->thumb) - 1);
+        if (p->rating_key) (*count)++;
+    }
+
+    json_value_free(root);
+    return 0;
+}
+
+/* ------------------------------------------------------------------
+ * plex_api_get_playlist_tracks
+ * GET {server_url}/playlists/{id}/items
+ * ------------------------------------------------------------------ */
+int plex_api_get_playlist_tracks(const PlexConfig *cfg, int playlist_id,
+                                 PlexTrack tracks[], int max, int *count)
+{
+    if (!cfg || !tracks || !count) return -1;
+    *count = 0;
+
+    char path[256];
+    snprintf(path, sizeof(path),
+             "/playlists/%d/items?X-Plex-Container-Start=0&X-Plex-Container-Size=%d",
+             playlist_id, max);
+
+    JSON_Value *root = server_get(cfg, path);
+    if (!root) return -1;
+
+    JSON_Object *mc = json_object_dotget_object(
+                          json_value_get_object(root), "MediaContainer");
+    JSON_Array  *meta = mc ? json_object_get_array(mc, "Metadata") : NULL;
+    size_t total = meta ? json_array_get_count(meta) : 0;
+    for (size_t i = 0; i < total && *count < max; i++) {
+        JSON_Object *item = json_array_get_object(meta, i);
+        const char *type = item ? json_object_get_string(item, "type") : NULL;
+        if (!item || (type && strcmp(type, "track") != 0)) continue;
+        parse_track(item, &tracks[*count]);
+        tracks[*count].track_number = 0;   /* album position means nothing here */
+        (*count)++;
+    }
+
+    json_value_free(root);
+    return 0;
+}
+
+/* ------------------------------------------------------------------
+ * plex_api_search
+ * GET {server_url}/hubs/search?query=...&sectionId=...&limit=...
+ * Response: MediaContainer.Hub[] with type artist / album / track.
+ * ------------------------------------------------------------------ */
+int plex_api_search(const PlexConfig *cfg, int section_id, const char *query,
+                    PlexSearchResults *out)
+{
+    if (!cfg || !query || !out) return -1;
+    memset(out, 0, sizeof(*out));
+
+    char q[512];
+    url_encode_value(query, q, sizeof(q));
+    char path[768];
+    snprintf(path, sizeof(path), "/hubs/search?query=%s&sectionId=%d&limit=%d",
+             q, section_id, PLEX_SEARCH_MAX_TRACKS);
+
+    JSON_Value *root = server_get(cfg, path);
+    if (!root) return -1;
+
+    JSON_Object *mc = json_object_dotget_object(
+                          json_value_get_object(root), "MediaContainer");
+    JSON_Array  *hubs = mc ? json_object_get_array(mc, "Hub") : NULL;
+    size_t hub_count = hubs ? json_array_get_count(hubs) : 0;
+    for (size_t h = 0; h < hub_count; h++) {
+        JSON_Object *hub  = json_array_get_object(hubs, h);
+        const char  *type = hub ? json_object_get_string(hub, "type") : NULL;
+        JSON_Array  *meta = hub ? json_object_get_array(hub, "Metadata") : NULL;
+        if (!type || !meta) continue;
+        size_t n = json_array_get_count(meta);
+        for (size_t i = 0; i < n; i++) {
+            JSON_Object *item = json_array_get_object(meta, i);
+            if (!item) continue;
+            if (!strcmp(type, "artist") && out->artist_count < PLEX_SEARCH_MAX_ARTISTS) {
+                PlexArtist *a = &out->artists[out->artist_count++];
+                memset(a, 0, sizeof(*a));
+                const char *rk    = json_object_get_string(item, "ratingKey");
+                const char *title = json_object_get_string(item, "title");
+                const char *thumb = json_object_get_string(item, "thumb");
+                a->rating_key = rk ? atoi(rk) : 0;
+                if (title) {
+                    strncpy(a->title, title, sizeof(a->title) - 1);
+                    strncpy(a->title_sort, title, sizeof(a->title_sort) - 1);
+                }
+                if (thumb) strncpy(a->thumb, thumb, sizeof(a->thumb) - 1);
+            } else if (!strcmp(type, "album") && out->album_count < PLEX_SEARCH_MAX_ALBUMS) {
+                parse_album(item, &out->albums[out->album_count++]);
+            } else if (!strcmp(type, "track") && out->track_count < PLEX_SEARCH_MAX_TRACKS) {
+                parse_track(item, &out->tracks[out->track_count]);
+                out->tracks[out->track_count++].track_number = 0;
+            }
+        }
+    }
+
+    json_value_free(root);
+    return 0;
 }

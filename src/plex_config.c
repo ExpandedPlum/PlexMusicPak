@@ -8,10 +8,12 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <time.h>
 
 #include "include/parson/parson.h"
 #include "api.h"
 #include "plex_log.h"
+#include "file_util.h"
 
 #define PLEX_CONFIG_FALLBACK_DIR "/mnt/SDCARD/.userdata/shared/plexmusic"
 #define PLEX_CONFIG_FILENAME     "config.json"
@@ -52,14 +54,69 @@ static void ensure_config_dir(const char *file_path)
     mkdir(dir, 0755);
 }
 
+/* conn_kinds as stored in config.json */
+static const char *const CONN_KIND_NAMES[] = { "local", "remote", "relay" };
+
+static PlexConnKind conn_kind_from_name(const char *name)
+{
+    for (int i = 0; i < 3; i++)
+        if (name && strcmp(name, CONN_KIND_NAMES[i]) == 0) return (PlexConnKind)i;
+    return PLEX_CONN_REMOTE;
+}
+
 /* ------------------------------------------------------------------
  * Public API
  * ------------------------------------------------------------------ */
 
+const char *plex_conn_kind_name(PlexConnKind kind)
+{
+    return ((unsigned)kind < 3) ? CONN_KIND_NAMES[kind] : "remote";
+}
+
+const char *plex_conn_kind_label(PlexConnKind kind)
+{
+    switch (kind) {
+        case PLEX_CONN_LOCAL: return "Local";
+        case PLEX_CONN_RELAY: return "Relay";
+        default:              return "Remote";
+    }
+}
+
+int plex_config_stream_kbps(const PlexConfig *cfg)
+{
+    if (cfg->stream_bitrate_kbps == 0 && cfg->server_kind == PLEX_CONN_RELAY)
+        return PLEX_RELAY_STREAM_KBPS;
+    return cfg->stream_bitrate_kbps;
+}
+
+void plex_config_defaults(PlexConfig *cfg)
+{
+    memset(cfg, 0, sizeof(*cfg));
+    cfg->screen_timeout        = 30;
+    cfg->stream_bitrate_kbps   = 128;
+    cfg->download_bitrate_kbps = 128;
+    cfg->pocket_lock_enabled   = true;
+    cfg->preload_count         = 2;
+}
+
+void plex_config_sign_out(PlexConfig *cfg)
+{
+    cfg->token[0]        = '\0';
+    cfg->server_url[0]   = '\0';
+    cfg->server_name[0]  = '\0';
+    cfg->server_id[0]    = '\0';
+    cfg->library_name[0] = '\0';
+    cfg->library_id      = 0;
+    cfg->conn_count      = 0;
+    memset(cfg->conn_urls, 0, sizeof(cfg->conn_urls));
+    cfg->server_kind     = PLEX_CONN_LOCAL;
+    cfg->offline_mode    = false;
+}
+
 int plex_config_load(PlexConfig *cfg)
 {
     if (!cfg) return -1;
-    memset(cfg, 0, sizeof(*cfg));
+    plex_config_defaults(cfg);
 
     char path[640];
     config_path(path, sizeof(path));
@@ -78,26 +135,57 @@ int plex_config_load(PlexConfig *cfg)
 
     const char *token       = json_object_get_string(obj, "token");
     const char *server_url  = json_object_get_string(obj, "server_url");
-    const char *relay_url   = json_object_get_string(obj, "relay_url");
     const char *server_name = json_object_get_string(obj, "server_name");
     const char *server_id   = json_object_get_string(obj, "server_id");
+    const char *client_id   = json_object_get_string(obj, "client_id");
 
     if (token)
         strncpy(cfg->token, token, sizeof(cfg->token) - 1);
     if (server_url)
         strncpy(cfg->server_url, server_url, sizeof(cfg->server_url) - 1);
-    if (relay_url)
-        strncpy(cfg->relay_url, relay_url, sizeof(cfg->relay_url) - 1);
+
+    JSON_Array *conns = json_object_get_array(obj, "connections");
+    if (conns) {
+        size_t n = json_array_get_count(conns);
+        for (size_t i = 0; i < n && cfg->conn_count < PLEX_MAX_CONNS; i++) {
+            /* {"uri","kind"} objects; bare URI strings from earlier builds */
+            JSON_Object *c  = json_array_get_object(conns, i);
+            const char *uri = c ? json_object_get_string(c, "uri")
+                                : json_array_get_string(conns, i);
+            if (!uri || !*uri) continue;
+            strncpy(cfg->conn_urls[cfg->conn_count], uri, PLEX_MAX_URL - 1);
+            cfg->conn_kinds[cfg->conn_count] =
+                conn_kind_from_name(c ? json_object_get_string(c, "kind") : NULL);
+            cfg->conn_count++;
+        }
+    } else {
+        /* Configs from before "connections" only kept server_url + relay_url.
+         * Their kinds are unknown; treat both as remote until the startup
+         * refresh replaces the list. */
+        const char *relay_url = json_object_get_string(obj, "relay_url");
+        if (server_url && *server_url) {
+            strncpy(cfg->conn_urls[cfg->conn_count], server_url, PLEX_MAX_URL - 1);
+            cfg->conn_kinds[cfg->conn_count++] = PLEX_CONN_REMOTE;
+        }
+        if (relay_url && *relay_url &&
+            !(server_url && strcmp(relay_url, server_url) == 0)) {
+            strncpy(cfg->conn_urls[cfg->conn_count], relay_url, PLEX_MAX_URL - 1);
+            cfg->conn_kinds[cfg->conn_count++] = PLEX_CONN_REMOTE;
+        }
+    }
+
     if (server_name)
         strncpy(cfg->server_name, server_name, sizeof(cfg->server_name) - 1);
     if (server_id)
         strncpy(cfg->server_id, server_id, sizeof(cfg->server_id) - 1);
+    if (client_id)
+        strncpy(cfg->client_id, client_id, sizeof(cfg->client_id) - 1);
 
     cfg->offline_mode = (json_object_get_boolean(obj, "offline_mode") == 1);
 
-    {
+    if (json_object_has_value(obj, "screen_timeout")) {
         int st = (int)json_object_get_number(obj, "screen_timeout");
-        cfg->screen_timeout = (st > 0) ? st : 30;
+        cfg->screen_timeout = st >= 0 ? st : 0;   /* 0 = Off */
     }
 
     cfg->library_id = (int)json_object_get_number(obj, "library_id");
@@ -105,28 +193,17 @@ int plex_config_load(PlexConfig *cfg)
     if (library_name)
         strncpy(cfg->library_name, library_name, sizeof(cfg->library_name) - 1);
 
+    /* Missing keys keep plex_config_defaults() values */
     if (json_object_has_value(obj, "stream_bitrate_kbps"))
         cfg->stream_bitrate_kbps = (int)json_object_get_number(obj, "stream_bitrate_kbps");
-    else
-        cfg->stream_bitrate_kbps = 128;
-
     if (json_object_has_value(obj, "download_bitrate_kbps"))
         cfg->download_bitrate_kbps = (int)json_object_get_number(obj, "download_bitrate_kbps");
-    else
-        cfg->download_bitrate_kbps = 128;
-
-    /* Default true: pocket lock on unless explicitly saved as false */
     if (json_object_has_value(obj, "pocket_lock_enabled"))
         cfg->pocket_lock_enabled = (json_object_get_boolean(obj, "pocket_lock_enabled") == 1);
-    else
-        cfg->pocket_lock_enabled = true;
-
     if (json_object_has_value(obj, "preload_count")) {
         cfg->preload_count = (int)json_object_get_number(obj, "preload_count");
         if (cfg->preload_count < 0)  cfg->preload_count = 0;
         if (cfg->preload_count > 10) cfg->preload_count = 10;
-    } else {
-        cfg->preload_count = 2;
     }
 
     json_value_free(root);
@@ -146,9 +223,19 @@ int plex_config_save(const PlexConfig *cfg)
 
     json_object_set_string(obj, "token",        cfg->token);
     json_object_set_string(obj, "server_url",   cfg->server_url);
-    json_object_set_string(obj, "relay_url",    cfg->relay_url);
+    JSON_Value *conns_val = json_value_init_array();
+    JSON_Array *conns     = json_value_get_array(conns_val);
+    for (int i = 0; i < cfg->conn_count; i++) {
+        JSON_Value  *c_val = json_value_init_object();
+        JSON_Object *c     = json_value_get_object(c_val);
+        json_object_set_string(c, "uri",  cfg->conn_urls[i]);
+        json_object_set_string(c, "kind", plex_conn_kind_name(cfg->conn_kinds[i]));
+        json_array_append_value(conns, c_val);
+    }
+    json_object_set_value(obj, "connections", conns_val);
     json_object_set_string(obj, "server_name",  cfg->server_name);
     json_object_set_string(obj, "server_id",    cfg->server_id);
+    json_object_set_string(obj, "client_id",    cfg->client_id);
     json_object_set_boolean(obj, "offline_mode", cfg->offline_mode ? 1 : 0);
     json_object_set_number(obj, "screen_timeout", cfg->screen_timeout);
     json_object_set_number(obj, "library_id",     cfg->library_id);
@@ -162,23 +249,43 @@ int plex_config_save(const PlexConfig *cfg)
     json_value_free(root);
     if (!json_str) return -1;
 
-    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) {
-        json_free_serialized_string(json_str);
-        return -1;
-    }
-
-    size_t len = strlen(json_str);
-    ssize_t written = write(fd, json_str, len);
-    int sync_err = fsync(fd);
-    close(fd);
+    int rc = write_file_atomic(path, json_str, strlen(json_str));
     json_free_serialized_string(json_str);
-
-    if (written != (ssize_t)len || sync_err != 0) {
-        PLEX_LOG_ERROR("[PlexConfig] Failed to write or fsync: %s\n", path);
+    if (rc != 0) {
+        PLEX_LOG_ERROR("[PlexConfig] Failed to write: %s\n", path);
         return -1;
     }
     return 0;
+}
+
+void plex_config_new_client_id(PlexConfig *cfg)
+{
+    unsigned char rnd[8] = {0};
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd < 0 || read(fd, rnd, sizeof(rnd)) != (ssize_t)sizeof(rnd)) {
+        /* No urandom: still unique enough per device */
+        unsigned long seed = (unsigned long)time(NULL) ^ ((unsigned long)getpid() << 16);
+        for (size_t i = 0; i < sizeof(rnd); i++) {
+            seed = seed * 1103515245UL + 12345UL;
+            rnd[i] = (unsigned char)(seed >> 16);
+        }
+    }
+    if (fd >= 0) close(fd);
+
+    int n = snprintf(cfg->client_id, sizeof(cfg->client_id), "plexmusic-");
+    for (size_t i = 0; i < sizeof(rnd); i++)
+        n += snprintf(cfg->client_id + n, sizeof(cfg->client_id) - n, "%02x", rnd[i]);
+}
+
+void plex_config_ensure_client_id(PlexConfig *cfg)
+{
+    if (cfg->client_id[0]) return;
+    if (cfg->token[0])
+        /* Signed in before per-device ids: the token was issued to the old
+         * shared id, so keep sending it until the next sign-in. */
+        snprintf(cfg->client_id, sizeof(cfg->client_id), "%s", PLEX_LEGACY_CLIENT_ID);
+    else
+        plex_config_new_client_id(cfg);
 }
 
 bool plex_config_is_valid(const PlexConfig *cfg)

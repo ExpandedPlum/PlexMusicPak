@@ -125,21 +125,6 @@ static void render_servers_screen(SDL_Surface *screen, const PlexServer servers[
     GFX_blitButtonGroup((char*[]){"A", "SELECT", "B", "BACK", NULL}, 1, screen, 1);
 }
 
-static void render_loading_screen(SDL_Surface *screen, const char *msg)
-{
-    SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x12, 0x12, 0x12));
-
-    int hw = screen->w;
-    int hh = screen->h;
-    SDL_Surface *surf = TTF_RenderUTF8_Blended(Fonts_getMedium(), msg, COLOR_WHITE);
-    if (surf) {
-        SDL_BlitSurface(surf, NULL, screen,
-                        &(SDL_Rect){(hw - surf->w) / 2, (hh - surf->h) / 2});
-        SDL_FreeSurface(surf);
-    }
-    GFX_flip(screen);
-}
-
 static void render_error_screen(SDL_Surface *screen, const char *message)
 {
     SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x12, 0x12, 0x12));
@@ -189,7 +174,7 @@ AppModule module_auth_run(SDL_Surface *screen)
     const char *error_msg = "Auth timed out";
 
     /* --- Enter PIN state --- */
-    render_loading_screen(screen, "Connecting to plex.tv...");
+    render_status_message(screen, "Connecting to plex.tv...");
     if (plex_auth_create_pin(&pin) != 0) {
         state = AUTH_STATE_ERROR;
         error_msg = "Failed to create PIN";
@@ -267,7 +252,7 @@ AppModule module_auth_run(SDL_Surface *screen)
             /* On first entry: fetch servers (synchronous) */
             if (server_count == 0 && pin.token[0] != '\0') {
                 /* Show loading screen before the blocking call */
-                render_loading_screen(screen, "Loading...");
+                render_status_message(screen, "Loading...");
 
                 PLEX_LOG("[Auth] Fetching servers...\n");
                 if (plex_auth_get_servers(pin.token, servers, &server_count) != 0) {
@@ -285,22 +270,12 @@ AppModule module_auth_run(SDL_Surface *screen)
 
                 if (server_count == 1) {
                     /* Auto-select the only server */
-                    PLEX_LOG("[Auth] Auto-selecting server: %s\n", servers[0].url);
+                    PLEX_LOG("[Auth] Auto-selecting server: %s\n", servers[0].name);
                     PlexConfig *cfg = plex_config_get_mutable();
                     strncpy(cfg->token, pin.token, PLEX_MAX_STR - 1);
                     cfg->token[PLEX_MAX_STR - 1] = '\0';
-                    strncpy(cfg->server_url, servers[0].url, PLEX_MAX_URL - 1);
-                    cfg->server_url[PLEX_MAX_URL - 1] = '\0';
-                    strncpy(cfg->relay_url, servers[0].relay_url, PLEX_MAX_URL - 1);
-                    cfg->relay_url[PLEX_MAX_URL - 1] = '\0';
-                    strncpy(cfg->server_name, servers[0].name, PLEX_MAX_STR - 1);
-                    cfg->server_name[PLEX_MAX_STR - 1] = '\0';
-                    strncpy(cfg->server_id, servers[0].id, PLEX_MAX_STR - 1);
-                    cfg->server_id[PLEX_MAX_STR - 1] = '\0';
+                    plex_auth_apply_server(cfg, &servers[0]);
                     PLEX_LOG("[Auth] Saving config...\n");
-                    if (cfg->stream_bitrate_kbps == 0)   cfg->stream_bitrate_kbps   = 128;
-                    if (cfg->download_bitrate_kbps == 0) cfg->download_bitrate_kbps = 128;
-                    if (cfg->preload_count == 0)         cfg->preload_count          = 2;
                     plex_config_save(cfg);
                     PLEX_LOG("[Auth] Returning MODULE_BROWSE\n");
                     return MODULE_BROWSE;
@@ -320,17 +295,7 @@ AppModule module_auth_run(SDL_Surface *screen)
                 PlexConfig *cfg = plex_config_get_mutable();
                 strncpy(cfg->token, pin.token, PLEX_MAX_STR - 1);
                 cfg->token[PLEX_MAX_STR - 1] = '\0';
-                strncpy(cfg->server_url, servers[server_selected].url, PLEX_MAX_URL - 1);
-                cfg->server_url[PLEX_MAX_URL - 1] = '\0';
-                strncpy(cfg->relay_url, servers[server_selected].relay_url, PLEX_MAX_URL - 1);
-                cfg->relay_url[PLEX_MAX_URL - 1] = '\0';
-                strncpy(cfg->server_name, servers[server_selected].name, PLEX_MAX_STR - 1);
-                cfg->server_name[PLEX_MAX_STR - 1] = '\0';
-                strncpy(cfg->server_id, servers[server_selected].id, PLEX_MAX_STR - 1);
-                cfg->server_id[PLEX_MAX_STR - 1] = '\0';
-                if (cfg->stream_bitrate_kbps == 0)   cfg->stream_bitrate_kbps   = 128;
-                if (cfg->download_bitrate_kbps == 0) cfg->download_bitrate_kbps = 128;
-                if (cfg->preload_count == 0)         cfg->preload_count          = 2;
+                plex_auth_apply_server(cfg, &servers[server_selected]);
                 plex_config_save(cfg);
                 return MODULE_BROWSE;
             } else if (PAD_justPressed(BTN_B)) {
@@ -339,7 +304,7 @@ AppModule module_auth_run(SDL_Surface *screen)
                 server_count = 0;
                 server_selected = 0;
                 server_scroll = 0;
-                render_loading_screen(screen, "Connecting to plex.tv...");
+                render_status_message(screen, "Connecting to plex.tv...");
                 if (plex_auth_create_pin(&pin) != 0) {
                     state = AUTH_STATE_ERROR;
                     error_msg = "Failed to create PIN";
@@ -373,7 +338,7 @@ AppModule module_auth_run(SDL_Surface *screen)
                 server_count = 0;
                 server_selected = 0;
                 server_scroll = 0;
-                render_loading_screen(screen, "Connecting to plex.tv...");
+                render_status_message(screen, "Connecting to plex.tv...");
                 if (plex_auth_create_pin(&pin) != 0) {
                     error_msg = "Failed to create PIN";
                     /* Stay in error state */

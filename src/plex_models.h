@@ -10,13 +10,29 @@
 #define PLEX_MAX_TRACKS        500  /* static per-album track array */
 #define PLEX_MAX_LIBRARIES      16  /* static library list */
 #define PLEX_MAX_OFFLINE_ITEMS 5000 /* offline artist/album array cap */
+#define PLEX_MAX_CONNS          8   /* connection URIs kept per server */
+
+/* How a connection URI reaches the server, from plex.tv's local/relay flags */
+typedef enum {
+    PLEX_CONN_LOCAL  = 0,
+    PLEX_CONN_REMOTE = 1,
+    PLEX_CONN_RELAY  = 2
+} PlexConnKind;
+
+/* Streaming bitrate used instead of Original while on a relay connection;
+ * Plex caps relay bandwidth at roughly 1-2 Mbps, too little for lossless. */
+#define PLEX_RELAY_STREAM_KBPS 128
 
 typedef struct {
     char token[PLEX_MAX_STR];
-    char server_url[PLEX_MAX_URL];   /* e.g. http://192.168.1.10:32400 */
-    char relay_url[PLEX_MAX_URL];    /* best relay-tier URL; fallback when LAN unreachable */
+    char server_url[PLEX_MAX_URL];   /* URL in use this session; first reachable conn_urls entry */
+    char conn_urls[PLEX_MAX_CONNS][PLEX_MAX_URL]; /* ranked: local, remote, relay */
+    PlexConnKind conn_kinds[PLEX_MAX_CONNS];
+    int  conn_count;
+    PlexConnKind server_kind;        /* kind of server_url; session only */
     char server_name[PLEX_MAX_STR];
-    char server_id[PLEX_MAX_STR];    /* machineIdentifier */
+    char server_id[PLEX_MAX_STR];    /* clientIdentifier */
+    char client_id[64];              /* this device's X-Plex-Client-Identifier */
     bool offline_mode;               /* true = offline browse; persisted to config.json */
     int  screen_timeout;             /* seconds before screen sleeps; 0 = disabled */
     int  library_id;                 /* section_id of the selected music library; 0 = none */
@@ -29,8 +45,9 @@ typedef struct {
 
 typedef struct {
     char name[PLEX_MAX_STR];
-    char url[PLEX_MAX_URL];          /* best connection URL */
-    char relay_url[PLEX_MAX_URL];    /* best relay-tier URL */
+    char conn_urls[PLEX_MAX_CONNS][PLEX_MAX_URL]; /* ranked: local, remote, relay */
+    PlexConnKind conn_kinds[PLEX_MAX_CONNS];
+    int  conn_count;
     char id[PLEX_MAX_STR];           /* clientIdentifier */
     bool owned;
 } PlexServer;
@@ -70,6 +87,16 @@ typedef struct {
     char audio_codec[32];            /* e.g. "flac", "mp3", "opus", "aac" */
     int  audio_bitrate_kbps;         /* 0 if unknown */
 } PlexTrack;
+
+#define PLEX_MAX_PLAYLISTS 200
+
+typedef struct {
+    int  rating_key;
+    int  track_count;                 /* leafCount */
+    bool smart;
+    char title[PLEX_MAX_STR];
+    char thumb[PLEX_MAX_URL];         /* "composite" artwork */
+} PlexPlaylist;
 
 /* Generic paginated result */
 typedef struct {

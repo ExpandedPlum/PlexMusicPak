@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include "defines.h"  // Brings in SDL2 via platform.h -> sdl.h
 #include "api.h"      // For SDL types and TTF
-#include "player.h"   // For AudioFormat
+#include "audio_out.h"   // For AudioFormat
 
 // Format duration as MM:SS
 void format_time(char* buf, int ms);
@@ -254,5 +254,9 @@ DialogBox render_dialog_box(SDL_Surface* screen, int box_w, int box_h);
 // y_button_label: label for Y button (e.g., "NEW", "MANAGE"), or NULL for no Y button
 void render_empty_state(SDL_Surface* screen, const char* message,
                         const char* subtitle, const char* y_button_label);
+
+// Clear the screen, draw one centered status line (e.g. "Connecting...") and flip.
+// For short blocking calls where no other UI is shown.
+void render_status_message(SDL_Surface* screen, const char* message);
 
 #endif

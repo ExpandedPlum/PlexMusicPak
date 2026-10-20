@@ -64,6 +64,37 @@ void plex_api_timeline(const PlexConfig *cfg, int rating_key,
  */
 void plex_api_scrobble(const PlexConfig *cfg, int rating_key);
 
+/* Audio playlists (regular and smart), up to max. Returns 0 on success. */
+int plex_api_get_playlists(const PlexConfig *cfg, PlexPlaylist out[], int max, int *count);
+
+/* A playlist's tracks in playlist order, up to max. Returns 0 on success. */
+int plex_api_get_playlist_tracks(const PlexConfig *cfg, int playlist_id,
+                                 PlexTrack tracks[], int max, int *count);
+
+#define PLEX_SEARCH_MAX_ARTISTS 20
+#define PLEX_SEARCH_MAX_ALBUMS  30
+#define PLEX_SEARCH_MAX_TRACKS  50
+
+typedef struct {
+    PlexArtist artists[PLEX_SEARCH_MAX_ARTISTS];
+    PlexAlbum  albums[PLEX_SEARCH_MAX_ALBUMS];
+    PlexTrack  tracks[PLEX_SEARCH_MAX_TRACKS];
+    int        artist_count, album_count, track_count;
+} PlexSearchResults;
+
+/* Search a music library for artists, albums and tracks matching query.
+ * Returns 0 on success. */
+int plex_api_search(const PlexConfig *cfg, int section_id, const char *query,
+                    PlexSearchResults *out);
+
+/* Set a track's star rating, 0-10 (10 = five stars / loved); -1 clears it.
+ * Returns 0 on success. */
+int plex_api_rate(const PlexConfig *cfg, int rating_key, int rating);
+
+/* Tracks in a library rated five stars, up to max. Returns 0 on success. */
+int plex_api_get_loved_tracks(const PlexConfig *cfg, int section_id,
+                              PlexTrack tracks[], int max, int *count);
+
 /*
  * Get paginated list of all albums in a library section, sorted by year descending.
  * offset: 0-based start. max_count: maximum items to write into albums[].

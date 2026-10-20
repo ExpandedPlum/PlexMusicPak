@@ -3,7 +3,7 @@
 
 #include <SDL2/SDL.h>
 #include <stdbool.h>
-#include "player.h"  // For AudioFormat
+#include "audio_out.h"  // For AudioFormat
 
 // Initialize icons (load from files and create inverted versions)
 void Icons_init(void);

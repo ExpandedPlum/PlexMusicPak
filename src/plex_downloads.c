@@ -16,6 +16,7 @@
 #include "plex_api.h"
 #include "plex_net.h"
 #include "plex_log.h"
+#include "file_util.h"
 #include "plex_favorites.h"
 
 /* ------------------------------------------------------------------
@@ -27,7 +28,7 @@
 #define DL_QUEUE_MAX              8
 #define MANIFEST_ALBUMS_CAP_INIT  128
 #define MANIFEST_TRACKS_CAP_INIT  2048
-#define MANIFEST_TRACKS_PER_ALBUM 64   /* per-album sanity cap in worker */
+#define MANIFEST_TRACKS_PER_ALBUM PLEX_MAX_TRACKS   /* everything plex_api_get_tracks returns */
 
 /* URL-encoded X-Plex-Client-Profile-Extra value requesting OGG/Opus output */
 #define OPUS_PROFILE_EXTRA \
@@ -238,13 +239,13 @@ static int opus_download_track(const char *server_url,
              "&musicBitrate=%d"
              "&session=%s"
              "&directPlay=0"
-             "&X-Plex-Client-Identifier=plexmusic-nextui"
+             "&X-Plex-Client-Identifier=%s"
              "&X-Plex-Session-Identifier=%s"
              "&X-Plex-Chunked=1"
              "&X-Plex-Client-Profile-Extra=%s"
              "&X-Plex-Token=%s",
              server_url, track_rating_key, bitrate_kbps,
-             session_id, session_id, OPUS_PROFILE_EXTRA, token);
+             session_id, plex_net_client_id(), session_id, OPUS_PROFILE_EXTRA, token);
 
     static uint8_t decision_buf[16 * 1024];
     PlexNetOptions opts;
@@ -270,13 +271,13 @@ static int opus_download_track(const char *server_url,
              "&musicBitrate=%d"
              "&session=%s"
              "&directPlay=0"
-             "&X-Plex-Client-Identifier=plexmusic-nextui"
+             "&X-Plex-Client-Identifier=%s"
              "&X-Plex-Session-Identifier=%s"
              "&X-Plex-Chunked=1"
              "&X-Plex-Client-Profile-Extra=%s"
              "&X-Plex-Token=%s",
              server_url, track_rating_key, bitrate_kbps,
-             session_id, session_id, OPUS_PROFILE_EXTRA, token);
+             session_id, plex_net_client_id(), session_id, OPUS_PROFILE_EXTRA, token);
 
     memset(&opts, 0, sizeof(opts));
     opts.method      = PLEX_HTTP_GET;
@@ -308,13 +309,13 @@ static int opus_download_track(const char *server_url,
              "&musicBitrate=%d"
              "&session=%s"
              "&directPlay=0"
-             "&X-Plex-Client-Identifier=plexmusic-nextui"
+             "&X-Plex-Client-Identifier=%s"
              "&X-Plex-Session-Identifier=%s"
              "&X-Plex-Chunked=1"
              "&X-Plex-Client-Profile-Extra=%s"
              "&X-Plex-Token=%s",
              server_url, track_rating_key, bitrate_kbps,
-             session_id, session_id, OPUS_PROFILE_EXTRA, token);
+             session_id, plex_net_client_id(), session_id, OPUS_PROFILE_EXTRA, token);
 
     static uint8_t stop_buf[1024];
     memset(&opts, 0, sizeof(opts));
@@ -422,21 +423,9 @@ static void manifest_save_locked(void)
         return;
     }
 
-    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) {
-        PLEX_LOG_ERROR("[Downloads] Cannot open manifest for write: %s\n", path);
-        json_free_serialized_string(json_str);
-        return;
-    }
-
-    size_t  len     = strlen(json_str);
-    ssize_t written = write(fd, json_str, len);
-    int     serr    = fsync(fd);
-    close(fd);
+    if (write_file_atomic(path, json_str, strlen(json_str)) != 0)
+        PLEX_LOG_ERROR("[Downloads] Failed to write manifest: %s\n", path);
     json_free_serialized_string(json_str);
-
-    if (written != (ssize_t)len || serr != 0)
-        PLEX_LOG_ERROR("[Downloads] Write/fsync error writing manifest\n");
 }
 
 /* ------------------------------------------------------------------

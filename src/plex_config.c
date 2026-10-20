@@ -89,10 +89,34 @@ int plex_config_stream_kbps(const PlexConfig *cfg)
     return cfg->stream_bitrate_kbps;
 }
 
+void plex_config_defaults(PlexConfig *cfg)
+{
+    memset(cfg, 0, sizeof(*cfg));
+    cfg->screen_timeout        = 30;
+    cfg->stream_bitrate_kbps   = 128;
+    cfg->download_bitrate_kbps = 128;
+    cfg->pocket_lock_enabled   = true;
+    cfg->preload_count         = 2;
+}
+
+void plex_config_sign_out(PlexConfig *cfg)
+{
+    cfg->token[0]        = '\0';
+    cfg->server_url[0]   = '\0';
+    cfg->server_name[0]  = '\0';
+    cfg->server_id[0]    = '\0';
+    cfg->library_name[0] = '\0';
+    cfg->library_id      = 0;
+    cfg->conn_count      = 0;
+    memset(cfg->conn_urls, 0, sizeof(cfg->conn_urls));
+    cfg->server_kind     = PLEX_CONN_LOCAL;
+    cfg->offline_mode    = false;
+}
+
 int plex_config_load(PlexConfig *cfg)
 {
     if (!cfg) return -1;
-    memset(cfg, 0, sizeof(*cfg));
+    plex_config_defaults(cfg);
 
     char path[640];
     config_path(path, sizeof(path));
@@ -159,9 +183,9 @@ int plex_config_load(PlexConfig *cfg)
 
     cfg->offline_mode = (json_object_get_boolean(obj, "offline_mode") == 1);
 
-    {
+    if (json_object_has_value(obj, "screen_timeout")) {
         int st = (int)json_object_get_number(obj, "screen_timeout");
-        cfg->screen_timeout = (st > 0) ? st : 30;
+        cfg->screen_timeout = st >= 0 ? st : 0;   /* 0 = Off */
     }
 
     cfg->library_id = (int)json_object_get_number(obj, "library_id");
@@ -169,28 +193,17 @@ int plex_config_load(PlexConfig *cfg)
     if (library_name)
         strncpy(cfg->library_name, library_name, sizeof(cfg->library_name) - 1);
 
+    /* Missing keys keep plex_config_defaults() values */
     if (json_object_has_value(obj, "stream_bitrate_kbps"))
         cfg->stream_bitrate_kbps = (int)json_object_get_number(obj, "stream_bitrate_kbps");
-    else
-        cfg->stream_bitrate_kbps = 128;
-
     if (json_object_has_value(obj, "download_bitrate_kbps"))
         cfg->download_bitrate_kbps = (int)json_object_get_number(obj, "download_bitrate_kbps");
-    else
-        cfg->download_bitrate_kbps = 128;
-
-    /* Default true: pocket lock on unless explicitly saved as false */
     if (json_object_has_value(obj, "pocket_lock_enabled"))
         cfg->pocket_lock_enabled = (json_object_get_boolean(obj, "pocket_lock_enabled") == 1);
-    else
-        cfg->pocket_lock_enabled = true;
-
     if (json_object_has_value(obj, "preload_count")) {
         cfg->preload_count = (int)json_object_get_number(obj, "preload_count");
         if (cfg->preload_count < 0)  cfg->preload_count = 0;
         if (cfg->preload_count > 10) cfg->preload_count = 10;
-    } else {
-        cfg->preload_count = 2;
     }
 
     json_value_free(root);

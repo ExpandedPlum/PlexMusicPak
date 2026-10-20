@@ -28,7 +28,7 @@
 #define DL_QUEUE_MAX              8
 #define MANIFEST_ALBUMS_CAP_INIT  128
 #define MANIFEST_TRACKS_CAP_INIT  2048
-#define MANIFEST_TRACKS_PER_ALBUM 64   /* per-album sanity cap in worker */
+#define MANIFEST_TRACKS_PER_ALBUM PLEX_MAX_TRACKS   /* everything plex_api_get_tracks returns */
 
 /* URL-encoded X-Plex-Client-Profile-Extra value requesting OGG/Opus output */
 #define OPUS_PROFILE_EXTRA \

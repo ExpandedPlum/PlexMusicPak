@@ -540,14 +540,10 @@ AppModule module_settings_run(SDL_Surface *screen)
                 /* Confirmed — stop playback, zero config, save, clear art, reset browse, go to auth */
                 plexd_cmd("/stop");
                 PlexConfig *cfg = plex_config_get_mutable();
-                char client_id[sizeof(cfg->client_id)];
-                memcpy(client_id, cfg->client_id, sizeof(client_id));
-                memset(cfg, 0, sizeof(*cfg));
+                plex_config_sign_out(cfg);   /* preferences stay */
                 /* Keep this device's id; a legacy shared id is replaced so
                  * the next sign-in gets a token of its own. */
-                if (strcmp(client_id, PLEX_LEGACY_CLIENT_ID) != 0)
-                    memcpy(cfg->client_id, client_id, sizeof(cfg->client_id));
-                else
+                if (strcmp(cfg->client_id, PLEX_LEGACY_CLIENT_ID) == 0)
                     plex_config_new_client_id(cfg);
                 plex_net_set_client_id(cfg->client_id);
                 plex_config_save(cfg);

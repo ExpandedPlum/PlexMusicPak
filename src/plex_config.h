@@ -29,6 +29,14 @@ void plex_config_new_client_id(PlexConfig *cfg);
  */
 void plex_config_ensure_client_id(PlexConfig *cfg);
 
+/* Zero cfg and set the defaults for a fresh install (screen timeout 30 s,
+ * 128 kbps streaming and downloads, pocket lock on). */
+void plex_config_defaults(PlexConfig *cfg);
+
+/* Forget the sign-in, server and library; keep the user's preferences and
+ * client_id. */
+void plex_config_sign_out(PlexConfig *cfg);
+
 /* Returns true if cfg has a non-empty token and server_url. */
 bool plex_config_is_valid(const PlexConfig *cfg);
 

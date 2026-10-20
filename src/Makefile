@@ -54,7 +54,7 @@ MY_LDFLAGS += -L$(PREFIX)/lib/$(CROSS_TRIPLE)
 MY_LDFLAGS += -L../../../NextUI/workspace/$(PLATFORM)/libmsettings
 MY_LDFLAGS += $(shell pkg-config --libs sdl2 glesv2 2>/dev/null || echo "-lSDL2 -lGLESv2")
 MY_LDFLAGS += -lSDL2_image -lSDL2_ttf
-MY_LDFLAGS += -lmsettings -lasound
+MY_LDFLAGS += -lmsettings -lasound -lsamplerate   # samplerate: NextUI api.c
 MY_LDFLAGS += -lzip -lpthread -ldl -lz -lm
 
 # NextUI common source files

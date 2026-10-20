@@ -1,106 +1,133 @@
-# PlexMusic.pak
+# Plex Music+ for NextUI
 
-**NOTE: I highly recommend updating [stock firmware](https://trimui.com/pages/trimui-brick-firmware) to the latest update. I noticed greatly improved wifi stability on v1.1.1**
+A Plex music player for the TrimUI Brick (`tg5040`) running
+[NextUI](https://nextui.loveretro.games/). Browse and stream your Plex music
+library, download albums for offline listening, and **keep listening while
+you play games**.
 
-Plex Pass is required for transcoding (which is set by default). If you do not have Plex Pass, you can change the quality presets to "Original" in Settings.
+This is a personal fork of
+[thwonp/PlexMusicPak](https://github.com/thwonp/PlexMusicPak). On top of the
+original it adds a background player service (`plexd`), Plex Relay support
+for networks that can't reach your server directly, playlists, search,
+favorites synced with Plex ratings, and in-game controls. It installs as its
+own pak, **Plex Music+**, so it can't be mixed up with the original.
 
-## What is this?
-
-PlexMusic.pak is a music player for the TrimUI Brick that streams music from a Plex Media Server. It runs natively (SDL3, no interpreter), cross-compiled for ARM aarch64. Installed as a NextUI pak, it appears in the Apps->Tools menu.
+> Transcoding (the default, 128 kbps Opus) needs Plex Pass on the server. If
+> you don't have it, set Streaming Quality and Download Quality to
+> *Original* in Settings.
 
 ## Features
 
+**Connecting**
+- Sign in with a PIN at [plex.tv/link](https://plex.tv/link): no typing passwords on the handheld.
+- Pick from every Plex server on your account.
+- Reaches your server however it can. The app tries the home network address
+  first, then the internet address, then **Plex Relay**. Relay works from
+  networks that can't see your server, like an IoT VLAN or a phone hotspot.
+  Settings shows which kind of connection is in use.
+- On relay, playback switches to 128 kbps Opus, because the relay is too slow
+  for original FLAC.
+- If the connection drops mid-session, the app looks for a working connection
+  again by itself.
+- All network traffic goes through `plexd`, which checks HTTPS certificates.
+- Each device gets its own Plex client ID, so it shows up as its own player in
+  Plex.
+
 **Browsing**
-- Browse by Artists → Albums → Tracks or jump straight to a flat Albums view sorted by release year
-- Playlists: your Plex music playlists (regular and smart) — A plays from the selected track
-- Search: find artists, albums and tracks with the on-screen keyboard
-- Album art displayed alongside every list
-- Animated loading screen with instant B-button cancel on any in-progress load
+- Artists → Albums → Tracks, or a flat Albums list sorted by release year.
+- **Playlists**: your Plex music playlists, regular and smart.
+- **Search** for artists, albums and tracks with the on-screen keyboard.
+- Album art next to every list. L1/R1 jump by letter or year.
+- B cancels any load that's in progress.
 
 **Playback**
-- Streams MP3, FLAC, WAV, M4A, AAC, OGG, and Opus
-- Set transcode quality for Opus conversions
-- Progressive playback — audio starts within ~2–3 s; no waiting for the full track to download
-- Scrobbles plays back to your Plex server
-
-**Offline**
-- Full offline mode: browse and play downloaded albums and favorites list without a network connection
-- Set download quality targets (original or Opus transcode)
-- Offline Artists and Albums views mirror the online experience
-- Warning prompt if you try to switch to offline while a download is in progress
-
-**Favorites**
-- Press Y on any track (online or offline) to toggle it as a favorite — a ♥ appears in the track listing
-- "Favorite Tracks" on the home menu shows all favorites; A queues the whole list, Y removes a track
-- Press Y on "Favorite Tracks" in online mode to sync: missing tracks are downloaded, removed favorites are deleted from local storage
-- Offline edits (add/remove favorites) are automatically picked up by the next online sync — no extra step needed
-- Favorites are mirrored to Plex as five-star ratings ("loved" in Plexamp): changes are sent right away when online and queued when offline; the Y sync sends anything queued and adds tracks you loved in Plexamp or Plex Web
-
-**Auth & setup**
-- PIN-based Plex authentication (plex.tv/link, no password entry needed)
-- Supports multiple Plex servers — pick one on first launch
-- Connects however the server is reachable: tries its home network address, then its internet address, then Plex Relay (works from networks that block your LAN, at Plex's relay speed cap — fine for Opus transcodes, too slow for original FLAC)
-- Auth and settings saved to SD card; no re-login needed after reboot
-- All network traffic (sign-in, browsing, art, downloads, streaming) goes through plexd, which verifies HTTPS certificates; if plexd isn't running the app connects directly
+- Plays MP3, FLAC, WAV, M4A/AAC, OGG and Opus, either as the original file or
+  transcoded to Opus at the quality you choose.
+- Starts in a couple of seconds; the next track is fetched in advance so the
+  change between tracks is quick.
+- Shuffle, repeat (All / One / Off), tap to skip, hold to seek.
+- Reports what you play to Plex: Now Playing in Plex Web and Plexamp,
+  play counts and history.
 
 **Keeps playing while you game**
-- Music plays in a small background service (plexd), so it keeps going after you quit the app, in the NextUI menu, and inside games
-- Games are muted while music plays and get their sound back when you pause (Settings → Mute Games While Playing)
-- In-game controls while a game runs: FN1 or SELECT+START = play/pause, SELECT+L1 / SELECT+R1 = previous / next track (Settings → In-Game Controls)
-- Music pauses for a few seconds whenever an app starts or exits, to skip NextUI's full-volume blip, and pauses before the device sleeps
-- Plugging in or unplugging USB-C or Bluetooth audio moves the music to the new output
+- Music plays in a small background service, `plexd`. It keeps going after
+  you leave the app, in the NextUI menu and inside games.
+- Games are muted while music plays and get their sound back when you pause.
+  You can turn this off in Settings.
+- **In-game controls**: play/pause and skip tracks without leaving the game.
+  Earphone media buttons work too.
+- Music pauses for a few seconds whenever an app starts or exits, to skip
+  NextUI's full-volume blip. It also pauses before the device sleeps.
+- Plugging in or unplugging USB-C or Bluetooth audio moves the music to the
+  new output.
 
-**Quality of life**
-- Background playback — press B from Now Playing to return to browse while audio keeps playing; X stops playback
-- Now Playing screen: shuffle (L2), repeat All/One/Off (R2), favorite (Y)
-- D-pad left/right: tap = skip track, hold = seek ±5 s
-- Queue auto-advances through an album during background playback
-- Configurable screen sleep timeout
-- MENU+SELECT wakes the screen from sleep when pocket lockout is enabled
-- MENU+START quits from anywhere instantly (music keeps playing; press X on Now Playing first to stop it)
-- Settings: switch server, sign out, change library, transcode options, game muting, in-game controls
+**Offline**
+- Download albums and your favorites to the SD card, as original files or
+  Opus.
+- Offline mode (SELECT) browses and plays only what's downloaded, with the
+  same Artists and Albums views.
 
-## Installation
+**Favorites**
+- Y on any track toggles it as a favorite (♥).
+- *Favorite Tracks* on the home screen lists them all.
+- Favorites are mirrored to Plex as five-star ratings, which Plexamp calls
+  "loved". Changes made offline are queued and sent later.
+- Y on *Favorite Tracks* syncs both ways: tracks you loved in Plexamp or Plex
+  Web are added, and missing ones are downloaded.
 
-This is a fork of [thwonp/PlexMusicPak](https://github.com/thwonp/PlexMusicPak). It installs to its own folder, `Tools/tg5040/Plex Music+.pak` (shown as "Plex Music+" in the Tools menu), and its `pak.json` has its own name and points at this repository, so the Pak Store never takes it for the original "Plex Music" and won't update over it.
+**Other**
+- Screen timeout and a pocket button lock (MENU+SELECT wakes the screen).
+- Settings, sign-in and downloads are kept on the SD card and survive
+  reboots and reinstalls.
 
-1. Download `PlexMusic-install.zip` (from a release, or the "PlexMusic-install" artifact of a CI run; GitHub wraps artifacts in another zip, so unzip that once first).
-2. Unzip it at the root of your SD card. It creates:
+## Install
 
-```
-Tools/tg5040/Plex Music+.pak/
-  launch.sh
-  pak.json
-  res/
-  bin/tg5040/
-    plexmusic.elf
-    libmsettings.so
-    plexd
-    ffmpeg
-  licenses/
-```
+1. Download `PlexMusic-install.zip` from
+   [Releases](https://github.com/ExpandedPlum/PlexMusicPak/releases), or take
+   the *PlexMusic-install* artifact from a
+   [CI run](https://github.com/ExpandedPlum/PlexMusicPak/actions/workflows/ci.yml).
+   GitHub wraps artifacts in a second zip, so unzip that one first.
+2. Unzip `PlexMusic-install.zip` at the **root of the SD card**. It creates:
 
-3. If you had the original "Plex Music" from the Pak Store, uninstall it there (or delete `Tools/tg5040/PlexMusic.pak`). Both use the same settings folder, `.userdata/shared/plexmusic/`, so your sign-in, favorites and downloads carry over, but two copies would overwrite each other's settings.
+   ```
+   Tools/tg5040/Plex Music+.pak/
+     launch.sh  pak.json  res/  licenses/
+     bin/tg5040/  plexmusic.elf  plexd  ffmpeg  libmsettings.so
+   ```
 
-You can rename the folder; keep the `.pak` ending.
+3. If you have the original **Plex Music** from the Pak Store, uninstall it
+   there or delete `Tools/tg5040/PlexMusic.pak`. Both use the same settings
+   folder, so your sign-in, favorites and downloads carry over. Keeping both
+   installed would make them overwrite each other's settings.
+
+To update, unzip a newer `PlexMusic-install.zip` over the old one.
+
+## First launch
+
+1. Open **Tools → Plex Music+**.
+2. A 4-character PIN appears. On a phone or computer, go to
+   [plex.tv/link](https://plex.tv/link) and enter it.
+3. Pick your server, then your music library (skipped if you only have one).
+
+Next time it goes straight to your library.
 
 ## Controls
 
-**Browsing**
+**Home and lists**
 
 | Button | Action |
 |---|---|
-| D-pad | Navigate lists |
-| A | Select / confirm |
+| D-pad | Move |
+| A | Open / play |
 | B | Back |
-| L1 / R1 | Jump to previous/next letter or year |
+| L1 / R1 | Previous / next letter or year |
 | SELECT | Toggle offline mode |
-| Y (on album) | Download album for offline use |
-| Y (on Favorite Tracks, online) | Sync favorites with Plex and download them for offline use |
-| Y (in a track list) | Toggle favorite |
-| Y (on search results) | New search |
+| Y on an album | Download it |
+| Y on a track | Toggle favorite |
+| Y on *Favorite Tracks* (online) | Sync favorites with Plex and download them |
+| Y on search results | New search |
 
-**On-screen keyboard (Search)**
+**On-screen keyboard**
 
 | Button | Action |
 |---|---|
@@ -114,87 +141,131 @@ You can rename the folder; keep the `.pak` ending.
 
 | Button | Action |
 |---|---|
-| A | Play / Pause |
-| B | Back to browse (music keeps playing) |
-| D-pad left/right (tap) | Previous / Next track |
-| D-pad left/right (hold) | Seek ±5 s |
-| D-pad up/down | Seek ±30 s |
-| L2 | Toggle shuffle |
-| R2 | Cycle repeat (Off → All → One) |
+| A | Play / pause |
+| LEFT / RIGHT (tap) | Previous / next track |
+| LEFT / RIGHT (hold) | Seek ±5 s |
+| UP / DOWN | Seek ±30 s |
+| L2 | Shuffle |
+| R2 | Repeat: Off → All → One |
 | Y | Toggle favorite |
 | X | Stop playback |
+| B | Back to browsing (keeps playing) |
 
-**In a game or the NextUI menu** (while music is loaded)
-
-| Button | Action |
-|---|---|
-| FN1, or SELECT + START | Play / Pause |
-| SELECT + L1 | Previous track |
-| SELECT + R1 | Next track |
-
-If Audiobookshelf.pak is also installed, its in-game buttons are the same; each only responds while it has something loaded, so stop one before using the other.
-
-**Global**
+**In a game or the NextUI menu**, while music is loaded:
 
 | Button | Action |
 |---|---|
-| MENU + START | Quit |
+| FN1, or SELECT+START, or earphone play button | Play / pause |
+| SELECT+L1, or earphone previous | Previous track |
+| SELECT+R1, or earphone next | Next track |
+
+The Audiobookshelf pak uses the same buttons. Each one only responds while it
+has something loaded, so stop one before using the other.
+
+**Anywhere**
+
+| Button | Action |
+|---|---|
 | START (short press) | Help |
-| START (long press) | Quit confirm |
+| START (hold) | Quit, with confirmation |
+| MENU+START | Quit right away |
 
-## First Launch
+Quitting leaves the music playing; press X on Now Playing first to stop it.
 
-1. Launch PlexMusic.pak from the Apps menu.
-2. A 4-character PIN is displayed. On another device, go to plex.tv/link and enter it.
-3. After signing in, select your Plex server.
-4. Browse your music library.
+## Settings
 
-Auth config is saved to SD card — subsequent launches go straight to browse.
+| Setting | What it does |
+|---|---|
+| Server | Switch server. Also shows the connection in use: local, remote or relay. |
+| Library | Switch music library. |
+| Screen timeout | When the screen turns off. |
+| Streaming Quality | Original, or Opus at a bitrate. On relay, Original plays as 128 kbps Opus. |
+| Download Quality | The same choice for downloads. |
+| Pocket Button Lock | While the screen is off, only MENU+SELECT wakes it, so buttons pressed in a pocket do nothing. |
+| Mute Games While Playing | Silence games while music plays. |
+| In-Game Controls | Turn the in-game buttons on or off. |
+| Sign Out | Forget the account. Your other settings stay. |
 
-## Log and Config Files
+## Troubleshooting
 
-- **Log:** `/mnt/SDCARD/.userdata/tg5040/logs/plexmusic.txt`
-- **Player service log:** `/mnt/SDCARD/.userdata/tg5040/logs/plexd.txt`
-- **Player service settings:** `/mnt/SDCARD/.userdata/shared/plexmusic/plexd.json`
-- **Config:** `/mnt/SDCARD/.userdata/shared/plexmusic/config.json`
-  - Contains token, server URL, stream quality setting
-- **Favorites:** `/mnt/SDCARD/.userdata/shared/plexmusic/favorites.json`
-- **Downloads:** `/mnt/SDCARD/.userdata/shared/plexmusic/downloads/`
-- **Art cache:** `/mnt/SDCARD/.userdata/shared/plexmusic/art/`
+- **"Failed to create PIN"**: the device can't reach plex.tv. Check that
+  Wi-Fi is connected and has internet access.
+- **Phone hotspot won't connect**: the connection problem is on the device,
+  not in the app. With an iPhone, turn on *Maximize Compatibility*, keep the
+  Personal Hotspot screen open while the Brick connects, and rename the phone
+  if its name has an apostrophe (Settings → General → About → Name). Updating
+  to the latest
+  [TrimUI firmware](https://trimui.com/pages/trimui-brick-firmware) also
+  helps Wi-Fi stability.
+- **Signs in but the library won't load**: the server isn't reachable by any
+  route. Check that Remote Access is enabled on the server. The log lists
+  each address that was tried.
+- **Original quality stutters**: you're probably on relay; check the
+  connection shown next to Server in Settings, and pick an Opus quality.
+- **No sound in games**: pause the music, or turn off *Mute Games While
+  Playing*.
 
-To sign out or switch servers, delete `config.json`.
+## Files
 
-## Building from Source
+| What | Where |
+|---|---|
+| App log | `.userdata/tg5040/logs/plexmusic.txt` |
+| Player service log | `.userdata/tg5040/logs/plexd.txt` |
+| Sign-in and app settings | `.userdata/shared/plexmusic/config.json` |
+| Player service settings | `.userdata/shared/plexmusic/plexd.json` |
+| Favorites | `.userdata/shared/plexmusic/favorites.json` |
+| Downloads | `.userdata/shared/plexmusic/downloads/` |
+| Album art cache | `.userdata/shared/plexmusic/art/` (trimmed automatically) |
 
-The CI workflow (`.github/workflows/ci.yml`) builds the whole pak on every push
-and uploads `PlexMusic.pak.zip` as an artifact. `scripts/build-pak.sh` does the
-same locally with Docker, Go and jq; it expects this repo at
-`<ws>/opencode/git/paks` and is run as `WS=<ws> scripts/build-pak.sh <version>`.
-It builds the UI, `ffmpeg` (`scripts/build-ffmpeg.sh`) and `plexd` (`cd plexd &&
-go test ./...` runs its tests, which need a host ffmpeg).
+All paths are relative to the SD card root.
 
-To build just the UI by hand, use the `ghcr.io/loveretro/tg5040-toolchain`
-Docker image (run via Podman):
+In `plexd.json` you can change the in-game buttons, using names like `FN1`
+or `SELECT+R1`, with commas between alternatives.
 
-```bash
-# Build libmsettings.so (once)
-podman run --rm \
-  -v /path/to/repo:/path/to/repo \
-  ghcr.io/loveretro/tg5040-toolchain:latest \
-  sh -c 'cd /path/to/repo/NextUI/workspace/tg5040/libmsettings && \
-    ${CROSS_COMPILE}gcc -c -fpic msettings.c && \
-    ${CROSS_COMPILE}gcc -shared -o libmsettings.so msettings.o -ltinyalsa -ldl -lrt && \
-    cp libmsettings.so /path/to/repo/git/paks/PlexMusic/bin/tg5040/'
+## How it works
 
-# Build the ELF
-podman run --rm \
-  -v /path/to/repo:/path/to/repo \
-  ghcr.io/loveretro/tg5040-toolchain:latest \
-  sh -c 'cd /path/to/repo/git/paks/PlexMusic/src && make 2>&1'
+- **`plexmusic.elf`** is the user interface, written in C with SDL2 and the
+  NextUI API. It draws the screens and asks `plexd` to play things.
+- **`plexd`** is a Go service that keeps running after the UI quits. It
+  handles the play queue and playback (through `ffmpeg`, one process per
+  track), connecting to Plex and reporting to it, game muting, and the
+  in-game buttons. It listens on `/tmp/plexd.sock`. All of the UI's network
+  requests go through `plexd` too, on `/tmp/plexd-net.sock`.
+- `launch.sh` starts `plexd` and installs small NextUI hooks, so music pauses
+  when the device sleeps and around app switches. `plexd` exits on its own a
+  few minutes after it goes idle.
+
+## Building
+
+CI (`.github/workflows/ci.yml`) runs the `plexd` tests and builds the whole
+pak on every push, then uploads both zips as artifacts. To publish a release,
+run the *Build & Release* workflow (`.github/workflows/build-release.yml`) by
+hand with a version number; it attaches both zips to a GitHub release.
+
+To build locally you need Docker, Go and jq:
+
+```sh
+WS=/path/to/workspace scripts/build-pak.sh 1.0.0
 ```
 
-Output: `bin/tg5040/plexmusic.elf`
+- The repo has to be at `$WS/opencode/git/paks`, because the UI's Makefile
+  finds NextUI at `../../../NextUI`. The script clones NextUI if it's missing.
+- The UI, `libmsettings.so` and `ffmpeg` (`scripts/build-ffmpeg.sh`) are built
+  in the `ghcr.io/loveretro/tg5040-toolchain` image; `plexd` with the host's
+  Go.
+- Set `FFMPEG_CACHE` to a directory to reuse an earlier ffmpeg build.
+- The output is `$WS/PlexMusic-install.zip`, plus `$WS/PlexMusic.pak.zip`
+  (the same files without the folder).
 
-## Disclaimer
+To run the `plexd` tests (they need `ffmpeg` installed on the host):
 
-This code was written with good vibes only (i.e Claude). I'm not a fullstack dev, just a person who wanted to listen to Plex on his TrimUI Brick.
+```sh
+cd plexd && go test ./...
+```
+
+## Credits
+
+Based on [PlexMusicPak](https://github.com/thwonp/PlexMusicPak) by Thwonp.
+The background service is modeled on the
+[Audiobookshelf pak](https://github.com/ExpandedPlum/ABS-NextUi) for NextUI.
+Third-party licenses are in `licenses/`.

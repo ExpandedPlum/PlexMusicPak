@@ -97,6 +97,11 @@ int main(int argc, char *argv[]) {
     plex_config_ensure_client_id(&g_config);
     plex_net_set_client_id(g_config.client_id);
 
+    /* plexd plays the music and makes our network requests (verifying HTTPS
+     * certificates); launch.sh starts it, this covers it not having done so.
+     * Without it, requests connect directly. */
+    plexd_ensure_running();
+
     if (!g_config.offline_mode) {
         render_status_message(screen, "Connecting to server...");
         if (plex_config_is_valid(&g_config)) {

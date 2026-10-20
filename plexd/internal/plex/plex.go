@@ -117,8 +117,10 @@ type Client struct {
 	Product, Version string
 
 	cfgPath string
+	tr      *http.Transport
 	http    *http.Client
 	stream  *http.Client // no overall timeout: audio streams for minutes
+	forward *http.Client // for the UI's requests (see ForwardProxy)
 
 	mu       sync.Mutex
 	cfg      Config
@@ -162,9 +164,13 @@ func New(cfgPath, version string) *Client {
 	t.TLSHandshakeTimeout = 8 * time.Second
 	t.ResponseHeaderTimeout = 30 * time.Second
 	return &Client{
-		Product: "PlexMusic", Version: version, cfgPath: cfgPath,
+		Product: "PlexMusic", Version: version, cfgPath: cfgPath, tr: t,
 		http:   &http.Client{Transport: t, Timeout: 20 * time.Second},
 		stream: &http.Client{Transport: t},
+		// Redirects go back to the UI, which follows them itself.
+		forward: &http.Client{Transport: t, CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}},
 	}
 }
 

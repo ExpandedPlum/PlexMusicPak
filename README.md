@@ -38,6 +38,7 @@ PlexMusic.pak is a music player for the TrimUI Brick that streams music from a P
 - Supports multiple Plex servers — pick one on first launch
 - Connects however the server is reachable: tries its home network address, then its internet address, then Plex Relay (works from networks that block your LAN, at Plex's relay speed cap — fine for Opus transcodes, too slow for original FLAC)
 - Auth and settings saved to SD card; no re-login needed after reboot
+- All network traffic (sign-in, browsing, art, downloads, streaming) goes through plexd, which verifies HTTPS certificates; if plexd isn't running the app connects directly
 
 **Keeps playing while you game**
 - Music plays in a small background service (plexd), so it keeps going after you quit the app, in the NextUI menu, and inside games

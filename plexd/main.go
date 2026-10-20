@@ -1,5 +1,6 @@
 // plexd is PlexMusic's playback daemon for NextUI. It keeps music playing
-// after the UI exits, in the NextUI menu and inside games.
+// after the UI exits, in the NextUI menu and inside games, and makes the UI's
+// network requests for it (/tmp/plexd-net.sock) with verified TLS.
 //
 //	plexd serve             run the daemon (normally started by launch.sh)
 //	plexd ctl <cmd> [json]  send a command to the running daemon, e.g.
@@ -35,6 +36,30 @@ func env(key, def string) string {
 }
 
 func socketPath() string { return env("PLEXD_SOCKET", "/tmp/plexd.sock") }
+
+// netSocketPath is where the UI sends its own HTTP requests for plexd to make
+// (see plex.Client.ForwardProxy).
+func netSocketPath() string { return env("PLEXD_NET_SOCKET", "/tmp/plexd-net.sock") }
+
+// serveNet runs the UI's request forwarder until done is closed.
+func serveNet(path string, h http.Handler, done <-chan struct{}) error {
+	_ = os.Remove(path)
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return err
+	}
+	_ = os.Chmod(path, 0o666)
+	srv := &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second}
+	go func() {
+		<-done
+		_ = srv.Close()
+		_ = os.Remove(path)
+	}()
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+		return err
+	}
+	return nil
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -163,6 +188,12 @@ func serve() {
 	go func() {
 		if err := svc.ServeControl(socketPath()); err != nil {
 			log.Fatalf("control socket: %v", err)
+		}
+	}()
+	go func() {
+		// Not fatal: the UI connects directly when this socket is missing.
+		if err := serveNet(netSocketPath(), svc.Plex.ForwardProxy(), svc.Done()); err != nil {
+			log.Printf("network socket: %v", err)
 		}
 	}()
 

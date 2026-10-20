@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -162,6 +163,47 @@ void plex_net_set_client_id(const char *client_id)
 const char *plex_net_client_id(void)
 {
     return s_client_id;
+}
+
+/* ------------------------------------------------------------------
+ * Requests through plexd
+ *
+ * When plexd is running, every request goes to its local socket as plain
+ * HTTP with the full URL in the request line (forward-proxy style), and
+ * plexd makes the real request with Go's TLS stack, which verifies
+ * certificates. Without plexd we connect directly as before (mbedTLS, no
+ * certificate check).
+ * ------------------------------------------------------------------ */
+
+static int net_proxy_connect(int timeout_sec)
+{
+    static int s_last_via = -1;   /* log only when this changes */
+    const char *sock_path = getenv("PLEXD_NET_SOCKET");
+    if (!sock_path || !sock_path[0]) sock_path = "/tmp/plexd-net.sock";
+
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd >= 0) {
+        struct sockaddr_un addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sun_family = AF_UNIX;
+        snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", sock_path);
+        if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+            close(fd);
+            fd = -1;
+        }
+    }
+    int via = fd >= 0;
+    if (via != s_last_via) {
+        PLEX_LOG(via ? "[PlexNet] requests go through plexd (%s)\n"
+                     : "[PlexNet] plexd not reachable at %s; connecting directly\n", sock_path);
+        s_last_via = via;
+    }
+    if (fd < 0) return -1;
+
+    struct timeval tv = { timeout_sec, 0 };
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    return fd;
 }
 
 /* ------------------------------------------------------------------
@@ -511,13 +553,20 @@ static int plex_net_fetch_internal(const char *url,
         free(host); free(path); return -1;
     }
 
+    int proxy_fd = net_proxy_connect(timeout_sec);
+
     /* Build request string */
     char *req = (char *)malloc(4096);
-    if (!req) { free(host); free(path); return -1; }
-    if (build_request(method_str, path, host, token, body, is_https, req, 4096) != 0) {
+    if (!req) {
+        if (proxy_fd >= 0) close(proxy_fd);
+        free(host); free(path); return -1;
+    }
+    if (build_request(method_str, proxy_fd >= 0 ? url : path, host, token, body,
+                      proxy_fd < 0 && is_https, req, 4096) != 0) {
         char safe_url[PLEX_MAX_URL];
         url_path_only(url, safe_url, sizeof(safe_url));
         PLEX_LOG_ERROR("[PlexNet] Request too large for URL: %s\n", safe_url);
+        if (proxy_fd >= 0) close(proxy_fd);
         free(req); free(host); free(path); return -1;
     }
 
@@ -526,7 +575,9 @@ static int plex_net_fetch_internal(const char *url,
     bool used_persist = false;
     bool stale_reconnected = false;
 
-    if (is_https) {
+    if (proxy_fd >= 0) {
+        sock_fd = proxy_fd;   /* plain HTTP to plexd; closed after the response */
+    } else if (is_https) {
         if (!no_persist &&
             s_persist_ctx &&
             strcmp(s_persist_host, host) == 0 &&
@@ -965,9 +1016,14 @@ static int plex_net_download_file_internal(const char *url,
         free(host); free(path); return -1;
     }
 
+    int proxy_fd = net_proxy_connect(timeout_sec);
+
     /* Build GET request (no POST body, no Accept: application/json for binary) */
     char *req = (char *)malloc(4096);
-    if (!req) { free(host); free(path); return -1; }
+    if (!req) {
+        if (proxy_fd >= 0) close(proxy_fd);
+        free(host); free(path); return -1;
+    }
 
     char token_header[320] = {0};
     if (token && *token) {
@@ -987,9 +1043,10 @@ static int plex_net_download_file_internal(const char *url,
         "%s"   /* optional token header */
         "Connection: close\r\n"
         "\r\n",
-        path, host, s_client_id, token_header);
+        proxy_fd >= 0 ? url : path, host, s_client_id, token_header);
     if (n < 0 || n >= 4096) {
         PLEX_LOG_ERROR("[PlexNet] download: request too large\n");
+        if (proxy_fd >= 0) close(proxy_fd);
         free(req); free(host); free(path); return -1;
     }
 
@@ -1000,7 +1057,9 @@ static int plex_net_download_file_internal(const char *url,
     char *hdr = NULL;
     int result = -1;
 
-    if (is_https) {
+    if (proxy_fd >= 0) {
+        sock_fd = proxy_fd;   /* plain HTTP to plexd */
+    } else if (is_https) {
         ssl_ctx = ssl_ctx_connect(host, port, timeout_sec);
         if (!ssl_ctx) {
             PLEX_LOG_ERROR("[PlexNet] download: SSL connect failed: %s:%d\n", host, port);

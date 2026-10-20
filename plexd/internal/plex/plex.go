@@ -165,12 +165,9 @@ func New(cfgPath, version string) *Client {
 	t.ResponseHeaderTimeout = 30 * time.Second
 	return &Client{
 		Product: "PlexMusic", Version: version, cfgPath: cfgPath, tr: t,
-		http:   &http.Client{Transport: t, Timeout: 20 * time.Second},
-		stream: &http.Client{Transport: t},
-		// Redirects go back to the UI, which follows them itself.
-		forward: &http.Client{Transport: t, CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		}},
+		http:    &http.Client{Transport: t, Timeout: 20 * time.Second},
+		stream:  &http.Client{Transport: t},
+		forward: &http.Client{Transport: t},
 	}
 }
 

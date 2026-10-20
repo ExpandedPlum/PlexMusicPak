@@ -4,8 +4,7 @@
 #include "defines.h"
 #include "api.h"
 #include "module_common.h"
-#include "player.h"
-#include "spectrum.h"
+#include "audio_out.h"
 #include "background.h"
 #include "plexd_client.h"
 #include "settings.h"
@@ -69,7 +68,7 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
 
     // Poll USB HID events (earphone buttons)
     USBHIDEvent hid_event;
-    while ((hid_event = Player_pollUSBHID()) != USB_HID_EVENT_NONE) {
+    while ((hid_event = AudioOut_pollUSBHID()) != USB_HID_EVENT_NONE) {
         if (ModuleCommon_handleHIDVolume(hid_event)) {
             result.dirty = true;
             result.input_consumed = true;
@@ -170,7 +169,6 @@ GlobalInputResult ModuleCommon_handleGlobalInput(SDL_Surface* screen, int* show_
             start_was_pressed = false;
             // Clear all GPU layers so dialog is not obscured
             GFX_clearLayers(LAYER_SCROLLTEXT);
-            PLAT_clearLayers(LAYER_SPECTRUM);
             // removed: PLAT_clearLayers(LAYER_PLAYTIME) (ui_music not in PlexMusic.pak)
             PLAT_GPU_Flip();
             // removed: PlayTime_clear() (ui_music not in PlexMusic.pak)
@@ -263,7 +261,6 @@ void ModuleCommon_quit(void) {
 
     // Clear all GPU layers
     GFX_clearLayers(LAYER_SCROLLTEXT);
-    PLAT_clearLayers(LAYER_SPECTRUM);
     // removed: PLAT_clearLayers(LAYER_PLAYTIME) (ui_music not in PlexMusic.pak)
     // removed: PLAT_clearLayers(LAYER_BUFFER)   (ui_radio not in PlexMusic.pak)
 }
@@ -316,7 +313,6 @@ bool ModuleCommon_handleHIDVolume(USBHIDEvent hid_event) {
     // USB HID events only come from USB DAC, so always use software volume
     SetVolume(vol);
     float v = vol / 20.0f;
-    Player_setVolume(v * v * v);
     plexd_set_volume(v * v * v);
     return true;
 }
@@ -331,10 +327,9 @@ void ModuleCommon_handleHardwareVolume(void) {
 
     // Don't increment volume here - keymon already handles SetVolume().
     // We only need to sync software volume for BT/USB DAC output.
-    if (Player_isBluetoothActive() || Player_isUSBDACActive()) {
+    if (AudioOut_isBluetoothActive() || AudioOut_isUSBDACActive()) {
         int vol = GetVolume();
         float v = vol / 20.0f;
-        Player_setVolume(v * v * v);
         plexd_set_volume(v * v * v);
     }
 }

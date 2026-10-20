@@ -15,7 +15,7 @@
 #include "plex_config.h"
 #include "plex_net.h"
 #include "plex_art.h"
-#include "player.h"
+#include "audio_out.h"
 #include "ui_fonts.h"
 #include "ui_utils.h"
 #include "module_auth.h"
@@ -74,11 +74,7 @@ int main(int argc, char *argv[]) {
     WIFI_init();
     Fonts_load();
     plex_art_init();
-    if (Player_init() != 0) {
-        PLEX_LOG_ERROR("[Main] Player_init failed\n");
-        plex_log_flush();
-        return EXIT_FAILURE;
-    }
+    AudioOut_init();
 
     plex_downloads_init();
 
@@ -162,7 +158,7 @@ int main(int argc, char *argv[]) {
     plex_downloads_quit();
     plex_favorites_quit();
     plex_art_cleanup();
-    Player_quit();
+    AudioOut_quit();
     Fonts_unload();
     PWR_quit();
     PAD_quit();

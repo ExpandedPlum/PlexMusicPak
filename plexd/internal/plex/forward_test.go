@@ -77,8 +77,8 @@ func TestForwardProxy(t *testing.T) {
 	if code != 200 || body != "GET  tok x=1" {
 		t.Fatalf("plain GET: %d %q", code, body)
 	}
-	if code, _, h := rawRequest(t, sock, "GET", plain.URL+"/redirect", "", ""); code != http.StatusFound || h.Get("Location") != "/elsewhere" {
-		t.Fatalf("redirects should come back to the caller: %d %v", code, h)
+	if code, _, _ := rawRequest(t, sock, "GET", plain.URL+"/redirect", "", ""); code != http.StatusNotFound {
+		t.Fatalf("redirects should be followed (to a 404 here): %d", code)
 	}
 	if code, _, _ := rawRequest(t, sock, "GET", plain.URL+"/missing", "", ""); code != 404 {
 		t.Fatalf("status should pass through: %d", code)
@@ -117,5 +117,36 @@ func TestForwardProxyPostBody(t *testing.T) {
 	}
 	if g := <-got; g != "POST strong=false application/x-www-form-urlencoded" {
 		t.Fatalf("POST forwarded as %q", g)
+	}
+}
+
+func TestForwardProxyCutsTruncatedBody(t *testing.T) {
+	// Upstream promises 1000 bytes and sends 10.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "1000")
+		_, _ = io.WriteString(w, "0123456789")
+		w.(http.Flusher).Flush()
+		if hj, ok := w.(http.Hijacker); ok {
+			conn, _, _ := hj.Hijack()
+			conn.Close()
+		}
+	}))
+	defer upstream.Close()
+	sock := serveForward(t, New(filepath.Join(t.TempDir(), "c.json"), "test"))
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_, _ = io.WriteString(conn, "GET "+upstream.URL+"/f HTTP/1.1\r\nHost: plexd\r\nConnection: close\r\n\r\n")
+	// Either way is an incomplete response: cut before the headers went out,
+	// or a body shorter than its Content-Length.
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		return
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err == nil {
+		t.Fatalf("a truncated upstream body must not look complete (got %d bytes, no error)", len(b))
 	}
 }

@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include "defines.h"  // Brings in SDL2 via platform.h -> sdl.h
 #include "api.h"      // For SDL types and TTF
-#include "player.h"   // For AudioFormat
+#include "audio_out.h"   // For AudioFormat
 
 // Format duration as MM:SS
 void format_time(char* buf, int ms);

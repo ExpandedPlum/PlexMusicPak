@@ -128,7 +128,7 @@ static int display_position_ms(void)
 
 #define COVER_SIZE    (is_brick ? SCALE1(100) : SCALE1(160))
 #define PROGRESS_H    SCALE1(8)
-#define PADDING       SCALE1(12)
+#define NP_PADDING       SCALE1(12)
 
 static void render_cover_art(SDL_Surface *screen, SDL_Surface *art, int x, int y)
 {
@@ -141,8 +141,8 @@ static void render_cover_art(SDL_Surface *screen, SDL_Surface *art, int x, int y
 static void render_progress_bar(SDL_Surface *screen, int y, float frac,
                                  uint32_t bg_color, uint32_t fg_color)
 {
-    int x = PADDING;
-    int w = screen->w - 2 * PADDING;
+    int x = NP_PADDING;
+    int w = screen->w - 2 * NP_PADDING;
 
     SDL_Rect bg = { x, y, w, PROGRESS_H };
     SDL_FillRect(screen, &bg, bg_color);
@@ -177,9 +177,9 @@ static void render_loading(SDL_Surface *screen, const PlexTrack *track)
 
     SDL_Surface *art = plex_art_get();
     int art_x = (screen->w - COVER_SIZE) / 2;
-    render_cover_art(screen, art, art_x, PADDING);
+    render_cover_art(screen, art, art_x, NP_PADDING);
 
-    int text_y = COVER_SIZE + PADDING * 2;
+    int text_y = COVER_SIZE + NP_PADDING * 2;
 
     SDL_Color white = COLOR_WHITE;
     SDL_Color gray  = { 0xAA, 0xAA, 0xAA, 0xFF };
@@ -191,7 +191,7 @@ static void render_loading(SDL_Surface *screen, const PlexTrack *track)
         render_text_centered(screen, Fonts_getArtist(), gray,  track->artist, text_y);
         text_y += TTF_FontHeight(Fonts_getArtist()) + SCALE1(4);
         render_text_centered(screen, Fonts_getAlbum(),  gray,  track->album,  text_y);
-        text_y += TTF_FontHeight(Fonts_getAlbum())  + PADDING;
+        text_y += TTF_FontHeight(Fonts_getAlbum())  + NP_PADDING;
     }
 
     uint32_t bg_col = SDL_MapRGB(screen->format, 0x40, 0x40, 0x40);
@@ -283,8 +283,8 @@ static void render_playing_screen(SDL_Surface *screen, const PlexdStatus *st,
                 + PROGRESS_H
                 + small_h;           /* timestamp */
 
-    /* Space left over for all gaps, with PADDING margin top and bottom */
-    int gap_pool = screen->h - 2 * PADDING - fixed_h;
+    /* Space left over for all gaps, with NP_PADDING margin top and bottom */
+    int gap_pool = screen->h - 2 * NP_PADDING - fixed_h;
     if (gap_pool < 0) gap_pool = 0;
 
     /* Distribute across 7 equal-weight slots:
@@ -299,7 +299,7 @@ static void render_playing_screen(SDL_Surface *screen, const PlexdStatus *st,
     int time_gap  = gap_unit;   /* bar->timestamp */
     int top_margin = gap_pool - gap_unit * 6;  /* remainder to centering */
 
-    int y = PADDING + top_margin;
+    int y = NP_PADDING + top_margin;
 
     /* Art */
     SDL_Surface *art = plex_art_get();
@@ -321,7 +321,7 @@ static void render_playing_screen(SDL_Surface *screen, const PlexdStatus *st,
 
     /* Progress bar and timestamp — anchored from the bottom so they are
      * never clipped regardless of font metric variance. */
-    int time_y = screen->h - PADDING - small_h;
+    int time_y = screen->h - NP_PADDING - small_h;
     int bar_y  = time_y - time_gap - PROGRESS_H;
 
     int dur_ms = st->duration_ms;

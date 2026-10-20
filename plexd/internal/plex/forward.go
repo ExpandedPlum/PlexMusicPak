@@ -26,8 +26,13 @@ func copyHeaders(dst, src http.Header) {
 // art and downloads. The UI writes plain HTTP to a local socket with the full
 // URL in the request line (like a forward proxy), and plexd makes the real
 // request with Go's HTTP and TLS stack: certificates are verified, TLS 1.3
-// works, and plex.direct names fall back to their encoded IP. The UI's own
-// headers (token, client id) pass through; redirects come back to it.
+// works, plex.direct names fall back to their encoded IP, and redirects are
+// followed. The UI's own headers (token, client id) pass through.
+//
+// If the upstream body fails partway, the connection is cut instead of
+// ending the response normally, so the UI sees the body as incomplete (a
+// short Content-Length body, or a chunked one without its final chunk) and
+// doesn't keep a truncated download.
 func (c *Client) ForwardProxy() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u := r.URL
@@ -62,6 +67,11 @@ func (c *Client) ForwardProxy() http.Handler {
 		defer resp.Body.Close()
 		copyHeaders(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
-		_, _ = io.Copy(w, resp.Body)
+		if _, err := io.Copy(w, resp.Body); err != nil {
+			if r.Context().Err() == nil {
+				log.Printf("net: %s %s://%s%s: body: %v", r.Method, u.Scheme, u.Host, u.Path, err)
+			}
+			panic(http.ErrAbortHandler) // cut the connection: the body is incomplete
+		}
 	})
 }

@@ -3,7 +3,7 @@
 
 #include <SDL2/SDL.h>
 #include <stdbool.h>
-#include "player.h"
+#include "audio_out.h"
 
 // Toast duration for all modules (3 seconds)
 #define TOAST_DURATION 3000

@@ -21,11 +21,15 @@ mkdir -p "$OUT"
 [ -d "$WS/opencode/NextUI" ] ||
 	git clone --depth 1 https://github.com/LoveRetro/NextUI.git "$WS/opencode/NextUI"
 
+# Same steps as NextUI's workspace/tg5040/libmsettings/makefile (which also
+# installs into the toolchain prefix, so it isn't run directly).
 echo "== libmsettings.so"
 docker run --rm -v "$WS:$WS" "$TOOLCHAIN" sh -c '
+	set -e
 	cd '"$WS"'/opencode/NextUI/workspace/tg5040/libmsettings
-	${CROSS_COMPILE}gcc -c -fpic msettings.c
-	${CROSS_COMPILE}gcc -shared -o libmsettings.so msettings.o -ltinyalsa -ldl -lrt
+	${CROSS_COMPILE}gcc -c -fpic msettings.c -I../../all/common
+	${CROSS_COMPILE}gcc -c -fpic ../../all/common/displaycal.c -I../../all/common
+	${CROSS_COMPILE}gcc -shared -o libmsettings.so msettings.o displaycal.o -ltinyalsa -ldl -lrt -lm -s
 	cp libmsettings.so '"$OUT"'/
 '
 

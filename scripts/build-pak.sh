@@ -8,6 +8,14 @@
 # NextUI at ../../../NextUI (cloned to $WS/opencode/NextUI if missing).
 # Set FFMPEG_CACHE to a directory to reuse an ffmpeg built from the same
 # scripts/build-ffmpeg.sh.
+#
+# Makes two zips in $WS:
+#   PlexMusic.pak.zip         the pak's contents, no top-level folder (the
+#                             format the Pak Store installs)
+#   PlexMusic-install.zip     Tools/tg5040/<INSTALL_DIR>/..., to unzip at the
+#                             root of the SD card. Its own folder name keeps it
+#                             apart from the upstream "Plex Music" pak, which
+#                             the Pak Store would otherwise update over it.
 set -eu
 
 VERSION="${1:?usage: build-pak.sh <version>}"
@@ -15,6 +23,7 @@ WS="${WS:-${GITHUB_WORKSPACE:?set WS or GITHUB_WORKSPACE}}"
 PAKS="$WS/opencode/git/paks"
 TOOLCHAIN="${TOOLCHAIN:-ghcr.io/loveretro/tg5040-toolchain:latest}"
 FFMPEG_VERSION="${FFMPEG_VERSION:-7.1.2}"
+INSTALL_DIR="${INSTALL_DIR:-Plex Music+.pak}"   # its name in NextUI's Tools menu
 OUT="$PAKS/bin/tg5040"
 
 mkdir -p "$OUT"
@@ -59,8 +68,8 @@ echo "== plexd"
 	-o "$OUT/plexd" .)
 
 echo "== package"
-STAGE="$WS/staging/PlexMusic.pak"
-rm -rf "$WS/staging" "$WS/PlexMusic.pak.zip"
+STAGE="$WS/staging/pak"
+rm -rf "$WS/staging" "$WS/PlexMusic.pak.zip" "$WS/PlexMusic-install.zip"
 mkdir -p "$STAGE/bin/tg5040"
 cp "$PAKS/launch.sh" "$PAKS/pak.json" "$STAGE/"
 cp -r "$PAKS/res" "$STAGE/res"
@@ -72,4 +81,9 @@ chmod +x "$STAGE/launch.sh" "$STAGE"/bin/tg5040/plexmusic.elf "$STAGE"/bin/tg504
 jq --arg v "$VERSION" '.version = $v' "$STAGE/pak.json" > "$WS/pak.json.tmp" && mv "$WS/pak.json.tmp" "$STAGE/pak.json"
 # No top-level directory: the pak store unzips straight into the pak folder.
 (cd "$STAGE" && zip -qr "$WS/PlexMusic.pak.zip" .)
-ls -la "$WS/PlexMusic.pak.zip"
+
+INSTALL="$WS/staging/install"
+mkdir -p "$INSTALL/Tools/tg5040"
+cp -r "$STAGE" "$INSTALL/Tools/tg5040/$INSTALL_DIR"
+(cd "$INSTALL" && zip -qr "$WS/PlexMusic-install.zip" Tools)
+ls -la "$WS/PlexMusic.pak.zip" "$WS/PlexMusic-install.zip"

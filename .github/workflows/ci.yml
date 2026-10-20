@@ -71,6 +71,7 @@ jobs:
           for f in launch.sh pak.json res/font.ttf bin/tg5040/plexmusic.elf bin/tg5040/libmsettings.so \
                    bin/tg5040/plexd bin/tg5040/ffmpeg licenses/THIRD_PARTY.md; do
             unzip -l PlexMusic.pak.zip | grep -q " $f\$" || { echo "missing $f"; exit 1; }
+            unzip -l PlexMusic-install.zip | grep -q " Tools/tg5040/Plex Music+.pak/$f\$" || { echo "install zip missing $f"; exit 1; }
           done
           file opencode/git/paks/bin/tg5040/plexmusic.elf opencode/git/paks/bin/tg5040/plexd opencode/git/paks/bin/tg5040/ffmpeg
 
@@ -79,3 +80,10 @@ jobs:
         with:
           name: PlexMusic.pak.zip
           path: PlexMusic.pak.zip
+
+      # Unzip at the root of the SD card
+      - name: Upload install zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: PlexMusic-install
+          path: PlexMusic-install.zip

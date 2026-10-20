@@ -62,14 +62,16 @@ PlexMusic.pak is a music player for the TrimUI Brick that streams music from a P
 
 ## Installation
 
-This is a fork of [thwonp/PlexMusicPak](https://github.com/thwonp/PlexMusicPak). Its `pak.json` has its own name and points at this repository, so the Pak Store doesn't treat it as the original "Plex Music" and won't replace it with an upstream update. Install it by copying it to the SD card as below rather than from the Pak Store, and don't install "Plex Music" from the store alongside it (both would use the same settings folder).
+This is a fork of [thwonp/PlexMusicPak](https://github.com/thwonp/PlexMusicPak). It installs to its own folder, `Tools/tg5040/Plex Music+.pak` (shown as "Plex Music+" in the Tools menu), and its `pak.json` has its own name and points at this repository, so the Pak Store never takes it for the original "Plex Music" and won't update over it.
+
+1. Download `PlexMusic-install.zip` (from a release, or the "PlexMusic-install" artifact of a CI run; GitHub wraps artifacts in another zip, so unzip that once first).
+2. Unzip it at the root of your SD card. It creates:
 
 ```
-Tools/tg5040/PlexMusic.pak/
+Tools/tg5040/Plex Music+.pak/
   launch.sh
   pak.json
   res/
-    font.ttf
   bin/tg5040/
     plexmusic.elf
     libmsettings.so
@@ -78,8 +80,9 @@ Tools/tg5040/PlexMusic.pak/
   licenses/
 ```
 
-1. Copy the above directory structure to your SD card under `Tools/tg5040/`.
-2. The pak will appear in NextUI's Apps menu.
+3. If you had the original "Plex Music" from the Pak Store, uninstall it there (or delete `Tools/tg5040/PlexMusic.pak`). Both use the same settings folder, `.userdata/shared/plexmusic/`, so your sign-in, favorites and downloads carry over, but two copies would overwrite each other's settings.
+
+You can rename the folder; keep the `.pak` ending.
 
 ## Controls
 

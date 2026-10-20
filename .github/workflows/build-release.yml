@@ -81,4 +81,4 @@ jobs:
             --title "PlexMusic $VERSION" \
             $PRERELEASE_FLAG \
             --notes-file release_notes.txt \
-            "PlexMusic.pak.zip"
+            "PlexMusic.pak.zip" "PlexMusic-install.zip"

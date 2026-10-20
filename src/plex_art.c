@@ -14,6 +14,7 @@
 
 #include "api.h"
 #include "plex_log.h"
+#include "file_util.h"
 
 /* ------------------------------------------------------------------
  * Module state
@@ -128,10 +129,8 @@ static SDL_Surface *load_surface_from_file(const char *path)
 
 static void save_to_cache(const char *path, const uint8_t *data, int size)
 {
-    FILE *f = fopen(path, "wb");
-    if (!f) return;
-    fwrite(data, 1, (size_t)size, f);
-    fclose(f);
+    /* A half-written image would be served from the cache forever */
+    write_file_atomic(path, data, (size_t)size);
 }
 
 /* ------------------------------------------------------------------

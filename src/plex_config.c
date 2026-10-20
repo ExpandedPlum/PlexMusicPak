@@ -13,6 +13,7 @@
 #include "include/parson/parson.h"
 #include "api.h"
 #include "plex_log.h"
+#include "file_util.h"
 
 #define PLEX_CONFIG_FALLBACK_DIR "/mnt/SDCARD/.userdata/shared/plexmusic"
 #define PLEX_CONFIG_FILENAME     "config.json"
@@ -235,20 +236,10 @@ int plex_config_save(const PlexConfig *cfg)
     json_value_free(root);
     if (!json_str) return -1;
 
-    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) {
-        json_free_serialized_string(json_str);
-        return -1;
-    }
-
-    size_t len = strlen(json_str);
-    ssize_t written = write(fd, json_str, len);
-    int sync_err = fsync(fd);
-    close(fd);
+    int rc = write_file_atomic(path, json_str, strlen(json_str));
     json_free_serialized_string(json_str);
-
-    if (written != (ssize_t)len || sync_err != 0) {
-        PLEX_LOG_ERROR("[PlexConfig] Failed to write or fsync: %s\n", path);
+    if (rc != 0) {
+        PLEX_LOG_ERROR("[PlexConfig] Failed to write: %s\n", path);
         return -1;
     }
     return 0;

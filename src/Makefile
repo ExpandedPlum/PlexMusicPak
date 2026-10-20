@@ -82,6 +82,7 @@ SOURCE = main.c \
          plex_downloads.c \
          plex_favorites.c \
          plex_net.c \
+         file_util.c \
          plexd_client.c \
          audio_out.c \
          background.c \

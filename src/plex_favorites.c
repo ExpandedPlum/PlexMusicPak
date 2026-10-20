@@ -10,6 +10,7 @@
 
 #include "include/parson/parson.h"
 #include "plex_log.h"
+#include "file_util.h"
 
 /* ------------------------------------------------------------------
  * Constants
@@ -101,21 +102,9 @@ static void favorites_save(void)
         return;
     }
 
-    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) {
-        PLEX_LOG_ERROR("[Favorites] Cannot open favorites for write: %s\n", path);
-        json_free_serialized_string(json_str);
-        return;
-    }
-
-    size_t  len     = strlen(json_str);
-    ssize_t written = write(fd, json_str, len);
-    int     serr    = fsync(fd);
-    close(fd);
+    if (write_file_atomic(path, json_str, strlen(json_str)) != 0)
+        PLEX_LOG_ERROR("[Favorites] Failed to write favorites: %s\n", path);
     json_free_serialized_string(json_str);
-
-    if (written != (ssize_t)len || serr != 0)
-        PLEX_LOG_ERROR("[Favorites] Write/fsync error writing favorites\n");
 }
 
 static void favorites_load(void)

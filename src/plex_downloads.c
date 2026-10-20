@@ -16,6 +16,7 @@
 #include "plex_api.h"
 #include "plex_net.h"
 #include "plex_log.h"
+#include "file_util.h"
 #include "plex_favorites.h"
 
 /* ------------------------------------------------------------------
@@ -422,21 +423,9 @@ static void manifest_save_locked(void)
         return;
     }
 
-    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) {
-        PLEX_LOG_ERROR("[Downloads] Cannot open manifest for write: %s\n", path);
-        json_free_serialized_string(json_str);
-        return;
-    }
-
-    size_t  len     = strlen(json_str);
-    ssize_t written = write(fd, json_str, len);
-    int     serr    = fsync(fd);
-    close(fd);
+    if (write_file_atomic(path, json_str, strlen(json_str)) != 0)
+        PLEX_LOG_ERROR("[Downloads] Failed to write manifest: %s\n", path);
     json_free_serialized_string(json_str);
-
-    if (written != (ssize_t)len || serr != 0)
-        PLEX_LOG_ERROR("[Downloads] Write/fsync error writing manifest\n");
 }
 
 /* ------------------------------------------------------------------
